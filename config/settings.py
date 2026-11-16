@@ -39,6 +39,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'apps.accounts',
+    'apps.organizations',
+    'apps.core',
+    'apps.sandbox',
 ]
 
 MIDDLEWARE = [
@@ -75,9 +78,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("LEZNARD_DB_NAME", "leznard"),
+        "USER": os.environ.get("LEZNARD_DB_USER", "leznard_app"),
+        "PASSWORD": os.environ.get("LEZNARD_DB_PASSWORD", "choose-another"),
+        "HOST": os.environ.get("LEZNARD_DB_HOST", "localhost"),
+        "PORT": os.environ.get("LEZNARD_DB_PORT", "5432"),
     }
 }
 

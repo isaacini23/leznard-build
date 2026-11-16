@@ -1,0 +1,3 @@
+CREATE ROLE leznard_owner LOGIN PASSWORD 'choose-a-password' CREATEDB;
+CREATE ROLE leznard_app   LOGIN PASSWORD 'choose-another' NOSUPERUSER NOBYPASSRLS;
+CREATE DATABASE leznard OWNER leznard_owner;
