@@ -1,6 +1,7 @@
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
+from django.db import DatabaseError, connection
 
 from django.db import connection
 
@@ -26,5 +27,8 @@ def organization_context(org_id):
     try:
         yield org_id
     finally:
-        _set_db_setting("")
+        try:
+            _set_db_setting("")
+        except DatabaseError:
+            pass
         _current_org_id.reset(token)
