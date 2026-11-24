@@ -11,7 +11,7 @@ from apps.core.tenancy import get_current_org_id, organization_context
 from apps.organizations.models import Membership
 
 from .models import AccountantAccessGrant, Invitation, Role, RoleAssignment
-from .permissions import ALL, DEFAULT_ROLES
+from .permissions import ALL, ACCOUNTANT_GRANTABLE_PERMISSIONS, DEFAULT_ROLES
 
 
 def create_default_roles(organization):
@@ -87,6 +87,13 @@ def create_accountant_invitation(
         raise PermissionDenied("You do not have permission to invite clients.")
     if not 1 <= expires_in_days <= 30:
         raise ValidationError({"expires_in_days": "Invitation expiry must be between 1 and 30 days."})
+    requested_permissions = set(requested_permissions)
+    if not requested_permissions or not requested_permissions.issubset(
+        set(ACCOUNTANT_GRANTABLE_PERMISSIONS)
+    ):
+        raise ValidationError(
+            {"requested_permissions": "Choose one or more supported accountant permissions."}
+        )
 
     secret = secrets.token_urlsafe(32)
     token = f"{firm_id}.{secret}"
@@ -110,7 +117,7 @@ def create_accountant_invitation(
         invitation = Invitation.objects.create(
             email=normalized_email,
             kind=Invitation.Kind.ACCOUNTANT_CLIENT,
-            requested_permissions=sorted(set(requested_permissions)),
+            requested_permissions=sorted(requested_permissions),
             invited_by=invited_by,
             token_hash=token_hash,
             expires_at=now + timedelta(days=expires_in_days),
@@ -159,6 +166,12 @@ def accept_accountant_invitation(
 
                 approved = set(approved_permissions)
                 requested = set(invitation.requested_permissions)
+                if not approved or not approved.issubset(
+                    set(ACCOUNTANT_GRANTABLE_PERMISSIONS)
+                ):
+                    raise ValidationError(
+                        {"approved_permissions": "Select one or more supported accountant permissions."}
+                    )
                 if not approved.issubset(requested):
                     raise ValidationError(
                         {"approved_permissions": "You can approve only permissions requested by the firm."}
