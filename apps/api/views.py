@@ -224,3 +224,52 @@ class RevokeAccountantInvitationView(APIView):
             {"invitation_id": str(invitation.id), "status": invitation.status},
             status=status.HTTP_200_OK,
         )
+
+
+
+class AccountantInvitationListView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def get(self, request):
+        invitations = Invitation.objects.order_by("-created_at")
+        return Response(
+            [
+                {
+                    "id": str(item.id),
+                    "email": item.email,
+                    "status": item.status,
+                    "requested_permissions": item.requested_permissions,
+                    "expires_at": item.expires_at,
+                    "accepted_at": item.accepted_at,
+                    "accepted_organization_id": (
+                        str(item.accepted_organization_id)
+                        if item.accepted_organization_id else None
+                    ),
+                }
+                for item in invitations
+            ]
+        )
+
+
+class AccountantAccessGrantListView(APIView):
+    permission_classes = [IsAuthenticated, require("access.role.manage")]
+
+    def get(self, request):
+        grants = AccountantAccessGrant.objects.select_related(
+            "accountant_organization", "granted_by", "revoked_by"
+        ).order_by("-created_at")
+        return Response(
+            [
+                {
+                    "id": str(grant.id),
+                    "accountant_organization_id": str(grant.accountant_organization_id),
+                    "accountant_organization_name": grant.accountant_organization.name,
+                    "permissions": grant.permissions,
+                    "status": grant.status,
+                    "granted_by": grant.granted_by.email,
+                    "revoked_by": grant.revoked_by.email if grant.revoked_by else None,
+                    "revoked_at": grant.revoked_at,
+                }
+                for grant in grants
+            ]
+        )
