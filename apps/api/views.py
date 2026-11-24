@@ -29,7 +29,9 @@ class MeView(APIView):
                     for m in memberships
                 ],
                 "active_organization": str(active) if active else None,
-                "permissions": sorted(get_permissions(request.user)),
+                "permissions": sorted(
+                    get_permissions(request.user, organization_id=active)
+                ),
             }
         )
 
@@ -68,6 +70,7 @@ class RegisterView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
