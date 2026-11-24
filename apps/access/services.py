@@ -98,12 +98,8 @@ def _accountant_permissions(user, client_organization_id):
 
 def has_accountant_access(user, client_organization_id):
     """Whether a firm user has a live client grant and a firm role."""
-    if not user.is_authenticated or not _has_active_membership(
-        user, client_organization_id
-    ):
-        # The user may be external to the client, so the firm membership is
-        # checked through the grant query below instead.
-        pass
+    if not user.is_authenticated:
+        return False
     return bool(_accountant_permissions(user, client_organization_id))
 
 
