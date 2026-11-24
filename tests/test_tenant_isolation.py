@@ -3,7 +3,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
 from django.db.utils import DatabaseError
 
-from apps.core.rls import tenant_tables
+from apps.core.rls import assert_database_role_is_rls_safe, tenant_tables
 from apps.core.tenancy import organization_context
 from apps.sandbox.models import Note
 
@@ -124,3 +124,8 @@ def test_suspended_member_is_rejected(client, user_a, org_a):
     user_a.memberships.update(status="suspended")
     client.force_login(user_a)
     assert client.get("/health/", HTTP_X_ORGANIZATION_ID=str(org_a.id)).status_code == 403
+
+
+@pytest.mark.django_db
+def test_application_database_role_cannot_bypass_rls():
+    assert_database_role_is_rls_safe()
