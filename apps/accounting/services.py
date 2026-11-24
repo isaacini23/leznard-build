@@ -72,7 +72,7 @@ from django.utils import timezone
 from .models import JournalEntry, JournalLine
 
 
-BASE_AMOUNT_QUANTUM = Decimal("0.0001")
+BASE_AMOUNT_QUANTUM = Decimal("0.0000000001")
 
 
 def _to_decimal(value, field_name):
