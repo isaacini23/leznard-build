@@ -11,6 +11,10 @@ urlpatterns = [
     path("accountant-invitations/", views.CreateAccountantInvitationView.as_view()),
     path("accountant-invitations/accept/", views.AcceptAccountantInvitationView.as_view()),
     path(
+        "accountant-invitations/<uuid:invitation_id>/revoke/",
+        views.RevokeAccountantInvitationView.as_view(),
+    ),
+    path(
         "accountant-access/<uuid:grant_id>/revoke/",
         views.RevokeAccountantAccessView.as_view(),
     ),
