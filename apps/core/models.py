@@ -1,6 +1,3 @@
-from django.db import models
-
-# Create your models here.
 import uuid
 
 from django.core.exceptions import PermissionDenied
@@ -37,10 +34,14 @@ class TenantModel(models.Model):
 
     def save(self, *args, **kwargs):
         active = get_current_org_id()
+        if active is None:
+            raise PermissionDenied(
+                "No active organization; refusing to save company data."
+            )
         if self.organization_id is None:
-            if active is None:
-                raise PermissionDenied("No active organization; refusing to save company data.")
             self.organization_id = active
-        elif active is not None and self.organization_id != active:
-            raise PermissionDenied("Cannot save a record that belongs to another organization.")
+        elif self.organization_id != active:
+            raise PermissionDenied(
+                "Cannot save a record that belongs to another organization."
+            )
         super().save(*args, **kwargs)
