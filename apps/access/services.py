@@ -212,7 +212,7 @@ def accept_accountant_invitation(
 
                 with organization_context(client_id):
                     grant, created = AccountantAccessGrant.objects.get_or_create(
-                        accountant_organization=firm_id,
+                        accountant_organization_id=firm_id,
                         defaults={
                             "permissions": sorted(approved),
                             "status": AccountantAccessGrant.Status.ACTIVE,
