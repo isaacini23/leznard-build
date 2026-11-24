@@ -232,7 +232,7 @@ def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by
             original.organization,
             entry_date=entry_date or timezone.localdate(),
             description=description or f"Reversal of {original.reference or original.pk}",
-            reference=f"REV-{original.reference}" if original.reference else "",
+            reference=f"REV-{original.reference}"[:50] if original.reference else "",
             currency=original.currency,
             exchange_rate=original.exchange_rate,
             lines=reversal_lines,
