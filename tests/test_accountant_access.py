@@ -162,12 +162,28 @@ def test_failed_database_setup_resets_context(monkeypatch, org_a):
     def fail(_value):
         raise DatabaseError("simulated database setup failure")
 
+    closed = []
     monkeypatch.setattr(tenancy, "_set_db_setting", fail)
+    monkeypatch.setattr(tenancy.connection, "close", lambda: closed.append(True))
     with pytest.raises(DatabaseError):
         with organization_context(org_a.id):
             pass
     assert get_current_org_id() is None
+    assert closed
 
+
+@pytest.mark.django_db
+def test_stale_database_tenant_setting_is_cleared(org_a, org_b):
+    from django.db import connection
+    from apps.core.tenancy import _set_db_setting
+
+    _set_db_setting(str(org_a.id))
+    with organization_context(org_b.id):
+        assert get_current_org_id() == org_b.id
+    assert get_current_org_id() is None
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT current_setting('app.current_org', true)")
+        assert cursor.fetchone()[0] in ("", None)
 
 
 @pytest.mark.django_db
