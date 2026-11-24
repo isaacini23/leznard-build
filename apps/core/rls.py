@@ -1,4 +1,5 @@
 from django.apps import apps as django_apps
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 
 POLICY = "tenant_isolation"
@@ -15,6 +16,27 @@ def tenant_tables():
     )
 
 
+def assert_database_role_is_rls_safe():
+    """Reject PostgreSQL roles that can bypass row-level security."""
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT rolsuper, rolbypassrls
+            FROM pg_roles
+            WHERE rolname = current_user
+            """
+        )
+        role_flags = cursor.fetchone()
+
+    if role_flags is None or role_flags[0] or role_flags[1]:
+        raise ImproperlyConfigured(
+            "Leznard's application database role must be neither SUPERUSER "
+            "nor BYPASSRLS. Configure a dedicated least-privilege PostgreSQL role."
+        )
+
+
 def enable_sql(table):
     return [
         f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY;',
@@ -27,6 +49,7 @@ def enable_sql(table):
 def ensure_row_level_security(**kwargs):
     if connection.vendor != "postgresql":
         return
+    assert_database_role_is_rls_safe()
     with connection.cursor() as cursor:
         for table in tenant_tables():
             for statement in enable_sql(table):
