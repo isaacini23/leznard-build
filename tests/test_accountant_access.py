@@ -1,0 +1,155 @@
+import pytest
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import DatabaseError
+
+from apps.access.models import AccountantAccessGrant, Role, RoleAssignment
+from apps.access.services import (
+    accept_accountant_invitation,
+    create_accountant_invitation,
+    create_default_roles,
+    get_permissions,
+    revoke_accountant_access,
+)
+from apps.core.tenancy import get_current_org_id, organization_context
+from apps.organizations.models import Membership, Organization
+from apps.accounts.models import User
+
+
+@pytest.mark.django_db
+def test_accountant_invitation_creates_client_owned_scoped_grant(user_a, org_a, org_b):
+    firm_user = user_a
+    Membership.objects.create(user=firm_user, organization=org_b, status=Membership.Status.ACTIVE)
+    client_owner = User.objects.create_user(email="client@example.com", password="pass12345!")
+    Membership.objects.create(user=client_owner, organization=org_b, status=Membership.Status.ACTIVE)
+
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=firm_user, role=Role.objects.get(name="Administrator"))
+        invitation, token = create_accountant_invitation(
+            invited_by=firm_user,
+            email=client_owner.email,
+            requested_permissions=["accounting.journal.view", "reports.report.view"],
+        )
+        assert token.startswith(f"{org_a.id}.")
+        assert invitation.token_hash not in token
+        assert invitation.requested_permissions == [
+            "accounting.journal.view", "reports.report.view"
+        ]
+
+    grant = accept_accountant_invitation(
+        token=token,
+        accepted_by=client_owner,
+        client_organization_id=org_b.id,
+        approved_permissions=["accounting.journal.view"],
+    )
+    assert grant.organization_id == org_b.id
+    assert grant.accountant_organization_id == org_a.id
+    assert grant.permissions == ["accounting.journal.view"]
+    assert grant.status == AccountantAccessGrant.Status.ACTIVE
+
+    with organization_context(org_b.id):
+        assert get_permissions(firm_user) == {"accounting.journal.view"}
+        assert AccountantAccessGrant.objects.filter(id=grant.id).exists()
+
+    with organization_context(org_a.id):
+        assert invitation.__class__.objects.get(id=invitation.id).status == "accepted"
+
+
+@pytest.mark.django_db
+def test_invitation_cannot_be_accepted_by_different_email(user_a, org_a, org_b):
+    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        invitation, token = create_accountant_invitation(
+            invited_by=user_a,
+            email="other@example.com",
+            requested_permissions=["reports.report.view"],
+        )
+
+    with pytest.raises(PermissionDenied):
+        accept_accountant_invitation(
+            token=token,
+            accepted_by=user_a,
+            client_organization_id=org_b.id,
+            approved_permissions=["reports.report.view"],
+        )
+
+
+@pytest.mark.django_db
+def test_client_cannot_approve_permissions_not_requested(user_a, org_a, org_b):
+    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        _, token = create_accountant_invitation(
+            invited_by=user_a,
+            email=user_a.email,
+            requested_permissions=["reports.report.view"],
+        )
+
+    with pytest.raises(ValidationError):
+        accept_accountant_invitation(
+            token=token,
+            accepted_by=user_a,
+            client_organization_id=org_b.id,
+            approved_permissions=["accounting.journal.post"],
+        )
+
+
+@pytest.mark.django_db
+def test_client_owner_can_revoke_accountant_access(user_a, org_a, org_b):
+    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        _, token = create_accountant_invitation(
+            invited_by=user_a,
+            email=user_a.email,
+            requested_permissions=["reports.report.view"],
+        )
+    grant = accept_accountant_invitation(
+        token=token,
+        accepted_by=user_a,
+        client_organization_id=org_b.id,
+        approved_permissions=["reports.report.view"],
+    )
+    with organization_context(org_b.id):
+        create_default_roles(org_b)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        revoke_accountant_access(grant_id=grant.id, revoked_by=user_a)
+        assert not get_permissions(user_a) == {"reports.report.view"}
+        assert AccountantAccessGrant.objects.get(id=grant.id).status == "revoked"
+
+
+@pytest.mark.django_db
+def test_role_assignment_rejects_suspended_or_nonmember_user(user_a, org_a):
+    with organization_context(org_a.id):
+        role = Role.objects.create(name="Test", permissions=["reports.report.view"])
+        user_a.memberships.update(status=Membership.Status.SUSPENDED)
+        with pytest.raises(ValidationError):
+            RoleAssignment.objects.create(user=user_a, role=role)
+
+
+@pytest.mark.django_db
+def test_nested_organization_context_restores_outer_context(org_a, org_b):
+    with organization_context(org_a.id):
+        assert get_current_org_id() == org_a.id
+        with organization_context(org_b.id):
+            assert get_current_org_id() == org_b.id
+        assert get_current_org_id() == org_a.id
+    assert get_current_org_id() is None
+
+
+@pytest.mark.django_db
+def test_failed_database_setup_resets_context(monkeypatch, org_a):
+    from apps.core import tenancy
+
+    def fail(_value):
+        raise DatabaseError("simulated database setup failure")
+
+    monkeypatch.setattr(tenancy, "_set_db_setting", fail)
+    with pytest.raises(DatabaseError):
+        with organization_context(org_a.id):
+            pass
+    assert get_current_org_id() is None
