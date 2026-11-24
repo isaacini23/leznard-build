@@ -121,6 +121,13 @@ class Invitation(TenantModel):
             models.Index(fields=["organization", "status"], name="invite_org_status_idx"),
             models.Index(fields=["status", "expires_at"], name="invite_status_exp_idx"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "email", "kind"],
+                condition=models.Q(status="pending"),
+                name="one_pending_invite_per_org_email_kind",
+            )
+        ]
 
     def clean(self):
         super().clean()
