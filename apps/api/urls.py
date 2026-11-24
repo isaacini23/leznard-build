@@ -9,6 +9,8 @@ urlpatterns = [
     path("login/", views.LoginView.as_view()),
     path("logout/", views.LogoutView.as_view()),
     path("accountant-invitations/", views.CreateAccountantInvitationView.as_view()),
+    path("accountant-invitations/list/", views.AccountantInvitationListView.as_view()),
+    path("accountant-access/", views.AccountantAccessGrantListView.as_view()),
     path("accountant-invitations/accept/", views.AcceptAccountantInvitationView.as_view()),
     path(
         "accountant-invitations/<uuid:invitation_id>/revoke/",
