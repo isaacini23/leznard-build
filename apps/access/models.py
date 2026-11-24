@@ -132,7 +132,7 @@ class Invitation(TenantModel):
     def clean(self):
         super().clean()
         if self.role_id and self.role.organization_id != self.organization_id:
-            raise ValidationError({"role": "The selected role must belong to the issuing organization."})
+                raise ValidationError({"role": "The selected role must belong to the issuing organization."})
         if self.kind == self.Kind.ACCOUNTANT_CLIENT and self.role_id:
             raise ValidationError({"role": "Accountant-client invitations do not assign a staff role."})
         if self.kind == self.Kind.MEMBER and self.accepted_organization_id:
