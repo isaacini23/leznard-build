@@ -18,7 +18,6 @@ from apps.accounts.models import User
 @pytest.mark.django_db
 def test_accountant_invitation_creates_client_owned_scoped_grant(user_a, org_a, org_b):
     firm_user = user_a
-    Membership.objects.create(user=firm_user, organization=org_b, status=Membership.Status.ACTIVE)
     client_owner = User.objects.create_user(email="client@example.com", password="pass12345!")
     Membership.objects.create(user=client_owner, organization=org_b, status=Membership.Status.ACTIVE)
 
