@@ -129,3 +129,9 @@ def test_suspended_member_is_rejected(client, user_a, org_a):
 @pytest.mark.django_db
 def test_application_database_role_cannot_bypass_rls():
     assert_database_role_is_rls_safe()
+
+
+
+def test_saving_with_explicit_company_without_active_context_is_refused(org_a):
+    with pytest.raises(PermissionDenied):
+        Note(text="orphan", organization=org_a).save()
