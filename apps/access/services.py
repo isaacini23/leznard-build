@@ -56,18 +56,55 @@ def get_permissions(user, organization_id=None):
         )
         return set(assignment.role.permissions) if assignment else set()
 
-    # External accountants do not receive a client staff role. Their
-    # permissions come only from the client-owned grant.
-    grants = AccountantAccessGrant.objects.filter(
-        organization_id=active_org_id,
-        accountant_organization__memberships__user=user,
-        accountant_organization__memberships__status=Membership.Status.ACTIVE,
-        status=AccountantAccessGrant.Status.ACTIVE,
-    ).distinct()
-    granted = set()
+    # External accountants need both a client-owned grant and an active
+    # role in their own firm. Effective permissions are the intersection of
+    # the client's grant and the firm's role, never the union.
+    return _accountant_permissions(user, active_org_id)
+
+
+def _accountant_permissions(user, client_organization_id):
+    with organization_context(client_organization_id):
+        grants = list(
+            AccountantAccessGrant.objects.filter(
+                organization_id=client_organization_id,
+                accountant_organization__memberships__user=user,
+                accountant_organization__memberships__status=Membership.Status.ACTIVE,
+                status=AccountantAccessGrant.Status.ACTIVE,
+            ).distinct()
+        )
+
+    effective = set()
     for grant in grants:
-        granted.update(grant.permissions)
-    return granted
+        firm_id = grant.accountant_organization_id
+        with organization_context(firm_id):
+            assignment = (
+                RoleAssignment.objects.filter(
+                    user=user,
+                    organization_id=firm_id,
+                    role__organization_id=firm_id,
+                )
+                .select_related("role")
+                .first()
+            )
+        if assignment is None:
+            continue
+        firm_permissions = set(assignment.role.permissions)
+        if ALL in firm_permissions:
+            effective.update(grant.permissions)
+        else:
+            effective.update(set(grant.permissions).intersection(firm_permissions))
+    return effective
+
+
+def has_accountant_access(user, client_organization_id):
+    """Whether a firm user has a live client grant and a firm role."""
+    if not user.is_authenticated or not _has_active_membership(
+        user, client_organization_id
+    ):
+        # The user may be external to the client, so the firm membership is
+        # checked through the grant query below instead.
+        pass
+    return bool(_accountant_permissions(user, client_organization_id))
 
 
 def has_permission(user, code, organization_id=None):
