@@ -61,3 +61,185 @@ def create_default_chart_of_accounts(organization):
             if created:
                 created_accounts.append(account)
     return created_accounts
+
+
+
+from decimal import Decimal, ROUND_HALF_UP
+
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+
+from .models import JournalEntry, JournalLine
+
+
+BASE_AMOUNT_QUANTUM = Decimal("0.0001")
+
+
+def _to_decimal(value, field_name):
+    try:
+        amount = Decimal(str(value))
+    except Exception as exc:
+        raise ValidationError({field_name: "Enter a valid decimal amount."}) from exc
+    if not amount.is_finite():
+        raise ValidationError({field_name: "Amount must be a finite number."})
+    return amount
+
+
+def _base_amount(amount, exchange_rate):
+    return (amount * exchange_rate).quantize(
+        BASE_AMOUNT_QUANTUM, rounding=ROUND_HALF_UP
+    )
+
+
+@transaction.atomic
+def create_journal_entry(
+    organization,
+    *,
+    entry_date,
+    description,
+    lines,
+    currency=None,
+    exchange_rate=None,
+    reference="",
+    reversal_of=None,
+):
+    """Create a draft journal and its lines within the supplied organization."""
+    base_currency = organization.base_currency.upper()
+    currency = (currency or base_currency).upper()
+    if currency == base_currency:
+        rate = Decimal("1")
+    else:
+        if exchange_rate is None:
+            raise ValidationError(
+                {"exchange_rate": "An exchange rate is required for foreign-currency entries."}
+            )
+        rate = _to_decimal(exchange_rate, "exchange_rate")
+        if rate <= 0:
+            raise ValidationError({"exchange_rate": "Exchange rate must be greater than zero."})
+
+    with organization_context(organization.pk):
+        entry = JournalEntry(
+            organization=organization,
+            entry_date=entry_date,
+            reference=reference,
+            description=description,
+            currency=currency,
+            base_currency=base_currency,
+            exchange_rate=rate,
+            reversal_of=reversal_of,
+        )
+        entry.save()
+
+        for item in lines:
+            account_value = item.get("account")
+            if isinstance(account_value, Account):
+                account = Account.unscoped.get(pk=account_value.pk)
+            else:
+                account = Account.unscoped.get(pk=account_value)
+
+            debit = _to_decimal(item.get("debit", 0), "debit")
+            credit = _to_decimal(item.get("credit", 0), "credit")
+            base_debit = _base_amount(debit, rate) if debit else Decimal("0")
+            base_credit = _base_amount(credit, rate) if credit else Decimal("0")
+
+            line = JournalLine(
+                organization=organization,
+                entry=entry,
+                account=account,
+                description=item.get("description", ""),
+                debit_amount=debit,
+                credit_amount=credit,
+                base_debit_amount=base_debit,
+                base_credit_amount=base_credit,
+            )
+            line.save()
+
+    return entry
+
+
+@transaction.atomic
+def post_journal_entry(entry, *, posted_by=None):
+    """Validate and permanently post a balanced draft journal."""
+    with organization_context(entry.organization_id):
+        locked = JournalEntry.unscoped.select_for_update().get(pk=entry.pk)
+        if locked.status != JournalEntry.Status.DRAFT:
+            raise ValidationError("Only draft journal entries can be posted.")
+
+        lines = list(
+            JournalLine.unscoped.select_related("account").filter(entry=locked)
+        )
+        if len(lines) < 2:
+            raise ValidationError("A journal entry must contain at least two lines.")
+
+        if not any(line.debit_amount > 0 for line in lines):
+            raise ValidationError("A journal entry must contain at least one debit.")
+        if not any(line.credit_amount > 0 for line in lines):
+            raise ValidationError("A journal entry must contain at least one credit.")
+
+        for line in lines:
+            if line.account.organization_id != locked.organization_id:
+                raise ValidationError("Every journal account must belong to this company.")
+            if not line.account.is_active:
+                raise ValidationError(
+                    {"account": f"Account {line.account.code} is inactive and cannot be posted to."}
+                )
+
+        debit_total = sum((line.debit_amount for line in lines), Decimal("0"))
+        credit_total = sum((line.credit_amount for line in lines), Decimal("0"))
+        if debit_total != credit_total:
+            raise ValidationError(
+                f"Journal is not balanced: debits {debit_total} do not equal credits {credit_total}."
+            )
+
+        base_debit_total = sum((line.base_debit_amount for line in lines), Decimal("0"))
+        base_credit_total = sum((line.base_credit_amount for line in lines), Decimal("0"))
+        if base_debit_total != base_credit_total:
+            raise ValidationError(
+                "Base-currency debits and credits do not balance after conversion. "
+                "Adjust the line amounts or exchange rate before posting."
+            )
+
+        locked.status = JournalEntry.Status.POSTED
+        locked.posted_at = timezone.now()
+        locked.posted_by = posted_by
+        locked.save()
+        return locked
+
+
+@transaction.atomic
+def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by=None):
+    """Create and post an equal-and-opposite journal, then mark the source reversed."""
+    with organization_context(entry.organization_id):
+        original = JournalEntry.unscoped.select_for_update().get(pk=entry.pk)
+        if original.status != JournalEntry.Status.POSTED:
+            raise ValidationError("Only posted journal entries can be reversed.")
+        if JournalEntry.unscoped.filter(reversal_of=original).exists():
+            raise ValidationError("This journal entry has already been reversed.")
+
+        original_lines = list(
+            JournalLine.unscoped.select_related("account").filter(entry=original)
+        )
+        reversal_lines = [
+            {
+                "account": line.account,
+                "description": line.description,
+                "debit": line.credit_amount,
+                "credit": line.debit_amount,
+            }
+            for line in original_lines
+        ]
+        reversal = create_journal_entry(
+            original.organization,
+            entry_date=entry_date or timezone.localdate(),
+            description=description or f"Reversal of {original.reference or original.pk}",
+            reference=f"REV-{original.reference}" if original.reference else "",
+            currency=original.currency,
+            exchange_rate=original.exchange_rate,
+            lines=reversal_lines,
+            reversal_of=original,
+        )
+        post_journal_entry(reversal, posted_by=posted_by)
+        JournalEntry.unscoped.filter(pk=original.pk).update(
+            status=JournalEntry.Status.REVERSED
+        )
+        return JournalEntry.unscoped.get(pk=reversal.pk)
