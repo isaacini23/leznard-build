@@ -138,11 +138,22 @@ def test_role_assignment_rejects_suspended_or_nonmember_user(user_a, org_a):
 
 @pytest.mark.django_db
 def test_nested_organization_context_restores_outer_context(org_a, org_b):
+    from django.db import connection
+
     with organization_context(org_a.id):
         assert get_current_org_id() == org_a.id
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_setting('app.current_org', true)")
+            assert cursor.fetchone()[0] == str(org_a.id)
         with organization_context(org_b.id):
             assert get_current_org_id() == org_b.id
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT current_setting('app.current_org', true)")
+                assert cursor.fetchone()[0] == str(org_b.id)
         assert get_current_org_id() == org_a.id
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_setting('app.current_org', true)")
+            assert cursor.fetchone()[0] == str(org_a.id)
     assert get_current_org_id() is None
 
 
@@ -158,3 +169,63 @@ def test_failed_database_setup_resets_context(monkeypatch, org_a):
         with organization_context(org_a.id):
             pass
     assert get_current_org_id() is None
+
+
+
+@pytest.mark.django_db
+def test_accountant_with_active_grant_can_select_client_company(client, user_a, org_a, org_b):
+    from apps.access.services import accept_accountant_invitation, create_accountant_invitation
+
+    firm_user = user_a
+    client_owner = User.objects.create_user(email="api-client@example.com", password="pass12345!")
+    Membership.objects.create(user=client_owner, organization=org_b, status=Membership.Status.ACTIVE)
+
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=firm_user, role=Role.objects.get(name="Administrator"))
+        _, token = create_accountant_invitation(
+            invited_by=firm_user,
+            email=client_owner.email,
+            requested_permissions=["reports.report.view"],
+        )
+    accept_accountant_invitation(
+        token=token,
+        accepted_by=client_owner,
+        client_organization_id=org_b.id,
+        approved_permissions=["reports.report.view"],
+    )
+
+    client.force_login(firm_user)
+    response = client.get("/api/v1/me/", HTTP_X_ORGANIZATION_ID=str(org_b.id))
+    assert response.status_code == 200
+    assert response.json()["active_organization"] == str(org_b.id)
+    assert response.json()["permissions"] == ["reports.report.view"]
+
+
+@pytest.mark.django_db
+def test_expired_accountant_invitation_is_marked_expired(user_a, org_a, org_b):
+    from django.utils import timezone
+    from datetime import timedelta
+
+    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        invitation, token = create_accountant_invitation(
+            invited_by=user_a,
+            email=user_a.email,
+            requested_permissions=["reports.report.view"],
+        )
+        invitation.expires_at = timezone.now() - timedelta(minutes=1)
+        invitation.save()
+
+    with pytest.raises(ValidationError):
+        accept_accountant_invitation(
+            token=token,
+            accepted_by=user_a,
+            client_organization_id=org_b.id,
+            approved_permissions=["reports.report.view"],
+        )
+
+    with organization_context(org_a.id):
+        assert invitation.__class__.objects.get(id=invitation.id).status == "expired"
