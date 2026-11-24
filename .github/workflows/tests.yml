@@ -1,0 +1,54 @@
+name: Django tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LEZNARD_DB_NAME: leznard_ci
+      LEZNARD_DB_USER: leznard_ci
+      LEZNARD_DB_PASSWORD: leznard_ci_password
+      LEZNARD_DB_HOST: 127.0.0.1
+      LEZNARD_DB_PORT: 5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "Django==5.2.19" djangorestframework "psycopg[binary]" pytest pytest-django
+      - name: Create least-privilege database role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE leznard_ci LOGIN PASSWORD 'leznard_ci_password'
+            CREATEDB NOSUPERUSER NOBYPASSRLS;
+          CREATE DATABASE leznard_ci OWNER leznard_ci;
+          SQL
+      - name: Check Django configuration
+        run: python manage.py check
+      - name: Check migration state
+        run: python manage.py makemigrations --check --dry-run
+      - name: Run tests
+        run: pytest -q

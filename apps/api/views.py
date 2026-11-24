@@ -1,17 +1,39 @@
 from django.contrib.auth import authenticate, login, logout
+from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.access.drf import require
-from apps.access.models import Role
-from apps.access.services import get_permissions
+from apps.access.models import AccountantAccessGrant, Invitation, Role
+from apps.access.services import (
+    accept_accountant_invitation,
+    create_accountant_invitation,
+    get_permissions,
+    revoke_accountant_access,
+    revoke_accountant_invitation,
+)
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Membership
 
-from .registration import register_company
-from .serializers import LoginSerializer, RegisterSerializer
+from .registration import create_company_for_user, register_company
+from .serializers import (
+    AcceptAccountantInvitationSerializer,
+    AccountantInvitationSerializer,
+    CreateCompanySerializer,
+    LoginSerializer,
+    RegisterSerializer,
+)
+
+
+def _service_error_response(exc):
+    if isinstance(exc, PermissionDenied):
+        return Response({"error": {"message": str(exc)}}, status=status.HTTP_403_FORBIDDEN)
+    if isinstance(exc, DjangoValidationError):
+        detail = getattr(exc, "message_dict", None) or getattr(exc, "messages", [str(exc)])
+        return Response({"error": {"details": detail}}, status=status.HTTP_400_BAD_REQUEST)
+    raise exc
 
 
 class MeView(APIView):
@@ -108,3 +130,171 @@ class LogoutView(APIView):
     def post(self, request):
         logout(request._request)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CreateAccountantInvitationView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def post(self, request):
+        serializer = AccountantInvitationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invitation, token = create_accountant_invitation(
+                invited_by=request.user,
+                **serializer.validated_data,
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        return Response(
+            {
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "expires_at": invitation.expires_at,
+                # The raw token is returned once; only its hash is stored.
+                "token": token,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AcceptAccountantInvitationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AcceptAccountantInvitationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            grant = accept_accountant_invitation(
+                accepted_by=request.user,
+                **serializer.validated_data,
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        return Response(
+            {
+                "grant_id": str(grant.id),
+                "client_organization_id": str(grant.organization_id),
+                "accountant_organization_id": str(grant.accountant_organization_id),
+                "permissions": grant.permissions,
+                "status": grant.status,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class RevokeAccountantAccessView(APIView):
+    permission_classes = [IsAuthenticated, require("access.role.manage")]
+
+    def post(self, request, grant_id):
+        try:
+            grant = revoke_accountant_access(
+                grant_id=grant_id,
+                revoked_by=request.user,
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        except AccountantAccessGrant.DoesNotExist:
+            return Response(
+                {"error": {"message": "Access grant not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {"grant_id": str(grant.id), "status": grant.status},
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class RevokeAccountantInvitationView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def post(self, request, invitation_id):
+        try:
+            invitation = revoke_accountant_invitation(
+                invitation_id=invitation_id,
+                revoked_by=request.user,
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        except Invitation.DoesNotExist:
+            return Response(
+                {"error": {"message": "Invitation not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {"invitation_id": str(invitation.id), "status": invitation.status},
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class AccountantInvitationListView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def get(self, request):
+        invitations = Invitation.objects.order_by("-created_at")
+        return Response(
+            [
+                {
+                    "id": str(item.id),
+                    "email": item.email,
+                    "status": item.status,
+                    "requested_permissions": item.requested_permissions,
+                    "expires_at": item.expires_at,
+                    "accepted_at": item.accepted_at,
+                    "accepted_organization_id": (
+                        str(item.accepted_organization_id)
+                        if item.accepted_organization_id else None
+                    ),
+                }
+                for item in invitations
+            ]
+        )
+
+
+class AccountantAccessGrantListView(APIView):
+    permission_classes = [IsAuthenticated, require("access.role.manage")]
+
+    def get(self, request):
+        grants = AccountantAccessGrant.objects.select_related(
+            "accountant_organization", "granted_by", "revoked_by"
+        ).order_by("-created_at")
+        return Response(
+            [
+                {
+                    "id": str(grant.id),
+                    "accountant_organization_id": str(grant.accountant_organization_id),
+                    "accountant_organization_name": grant.accountant_organization.name,
+                    "permissions": grant.permissions,
+                    "status": grant.status,
+                    "granted_by": grant.granted_by.email,
+                    "revoked_by": grant.revoked_by.email if grant.revoked_by else None,
+                    "revoked_at": grant.revoked_at,
+                }
+                for grant in grants
+            ]
+        )
+
+
+
+class CreateCompanyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateCompanySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        organization = create_company_for_user(
+            user=request.user,
+            **serializer.validated_data,
+        )
+        return Response(
+            {
+                "organization": {
+                    "id": str(organization.id),
+                    "name": organization.name,
+                    "country": organization.country,
+                    "base_currency": organization.base_currency,
+                }
+            },
+            status=status.HTTP_201_CREATED,
+        )

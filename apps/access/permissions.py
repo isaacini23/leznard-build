@@ -65,3 +65,14 @@ DEFAULT_ROLES = [
         ],
     ),
 ]
+
+# External accounting firms must never receive company-administration powers
+# through an accountant-client grant. Those remain with the client's own users.
+ACCOUNTANT_GRANTABLE_PERMISSIONS = [
+    code for code in PERMISSIONS
+    if code not in {
+        "organizations.branch.manage",
+        "access.role.manage",
+        "access.user.invite",
+    }
+]
