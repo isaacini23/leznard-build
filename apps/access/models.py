@@ -31,8 +31,12 @@ class RoleAssignment(TenantModel):
 
     def clean(self):
         super().clean()
-        if self.role_id and self.organization_id and self.role.organization_id != self.organization_id:
-            raise ValidationError({"role": "The selected role must belong to this organization."})
+        if self.role_id and self.organization_id:
+            role_org_id = Role.unscoped.filter(id=self.role_id).values_list(
+                "organization_id", flat=True
+            ).first()
+            if role_org_id != self.organization_id:
+                raise ValidationError({"role": "The selected role must belong to this organization."})
         if self.user_id and self.organization_id:
             from apps.organizations.models import Membership
 
@@ -130,6 +134,10 @@ class Invitation(TenantModel):
             )
 
     def save(self, *args, **kwargs):
+        from apps.core.tenancy import get_current_org_id
+
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         self.clean()
         return super().save(*args, **kwargs)
 
