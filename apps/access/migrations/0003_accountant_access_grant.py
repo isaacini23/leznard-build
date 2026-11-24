@@ -1,3 +1,5 @@
+import uuid
+
 import django.contrib.postgres.fields
 import django.db.models.deletion
 from django.conf import settings
@@ -25,14 +27,14 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="AccountantAccessGrant",
             fields=[
-                ("id", models.UUIDField(default=__import__("uuid").uuid4, editable=False, primary_key=True, serialize=False)),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 ("permissions", django.contrib.postgres.fields.ArrayField(
                     base_field=models.CharField(max_length=100), blank=True, default=list, size=None
                 )),
                 ("status", models.CharField(
-                    choices=[("active", "Active"), ("revoked", "Revoked")],
+                    choices=[("active", "Active"), ("revoked", "Revoked)],
                     default="active",
                     max_length=10,
                 )),
