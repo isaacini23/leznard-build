@@ -104,7 +104,9 @@ def create_accountant_invitation(
     return invitation, token
 
 
-def accept_accountant_invitation(*, token, accepted_by, client_organization_id, approved_permissions):
+def accept_accountant_invitation(
+    *, token, accepted_by, client_organization_id, approved_permissions
+):
     try:
         firm_text, secret = token.split(".", 1)
         firm_id = uuid.UUID(firm_text)
@@ -113,6 +115,8 @@ def accept_accountant_invitation(*, token, accepted_by, client_organization_id, 
         raise ValidationError({"token": "This invitation link is invalid."})
 
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    grant = None
+    expired = False
     with transaction.atomic():
         with organization_context(firm_id):
             try:
@@ -128,46 +132,54 @@ def accept_accountant_invitation(*, token, accepted_by, client_organization_id, 
             if invitation.expires_at <= timezone.now():
                 invitation.status = Invitation.Status.EXPIRED
                 invitation.save(update_fields=["status", "updated_at"])
-                raise ValidationError({"token": "This invitation has expired."})
-            if accepted_by.email.strip().lower() != invitation.email.strip().lower():
-                raise PermissionDenied("Sign in with the email address that received this invitation.")
-            if not _has_active_membership(accepted_by, client_id):
-                raise PermissionDenied("You must be an active member of the business you select.")
+                expired = True
+            else:
+                if accepted_by.email.strip().lower() != invitation.email.strip().lower():
+                    raise PermissionDenied(
+                        "Sign in with the email address that received this invitation."
+                    )
+                if not _has_active_membership(accepted_by, client_id):
+                    raise PermissionDenied(
+                        "You must be an active member of the business you select."
+                    )
 
-            approved = set(approved_permissions)
-            requested = set(invitation.requested_permissions)
-            if not approved.issubset(requested):
-                raise ValidationError(
-                    {"approved_permissions": "You can approve only permissions requested by the firm."}
+                approved = set(approved_permissions)
+                requested = set(invitation.requested_permissions)
+                if not approved.issubset(requested):
+                    raise ValidationError(
+                        {"approved_permissions": "You can approve only permissions requested by the firm."}
+                    )
+
+                with organization_context(client_id):
+                    grant, created = AccountantAccessGrant.objects.get_or_create(
+                        accountant_organization=firm_id,
+                        defaults={
+                            "permissions": sorted(approved),
+                            "status": AccountantAccessGrant.Status.ACTIVE,
+                            "granted_by": accepted_by,
+                        },
+                    )
+                    if not created:
+                        grant.permissions = sorted(approved)
+                        grant.status = AccountantAccessGrant.Status.ACTIVE
+                        grant.granted_by = accepted_by
+                        grant.revoked_by = None
+                        grant.revoked_at = None
+                        grant.save()
+
+                invitation.status = Invitation.Status.ACCEPTED
+                invitation.accepted_by = accepted_by
+                invitation.accepted_organization_id = client_id
+                invitation.accepted_at = timezone.now()
+                invitation.save(
+                    update_fields=[
+                        "status", "accepted_by", "accepted_organization",
+                        "accepted_at", "updated_at",
+                    ]
                 )
 
-            with organization_context(client_id):
-                grant, created = AccountantAccessGrant.objects.get_or_create(
-                    accountant_organization=firm_id,
-                    defaults={
-                        "permissions": sorted(approved),
-                        "status": AccountantAccessGrant.Status.ACTIVE,
-                        "granted_by": accepted_by,
-                    },
-                )
-                if not created:
-                    grant.permissions = sorted(approved)
-                    grant.status = AccountantAccessGrant.Status.ACTIVE
-                    grant.granted_by = accepted_by
-                    grant.revoked_by = None
-                    grant.revoked_at = None
-                    grant.save()
-
-            invitation.status = Invitation.Status.ACCEPTED
-            invitation.accepted_by = accepted_by
-            invitation.accepted_organization_id = client_id
-            invitation.accepted_at = timezone.now()
-            invitation.save(
-                update_fields=[
-                    "status", "accepted_by", "accepted_organization",
-                    "accepted_at", "updated_at",
-                ]
-            )
+    if expired:
+        raise ValidationError({"token": "This invitation has expired."})
     return grant
 
 
