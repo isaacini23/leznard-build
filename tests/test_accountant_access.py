@@ -292,3 +292,33 @@ def test_role_from_another_company_cannot_be_assigned(user_a, org_a, org_b):
     with organization_context(org_b.id):
         with pytest.raises(ValidationError):
             RoleAssignment.objects.create(user=user_a, role=foreign_role)
+
+
+
+@pytest.mark.django_db
+def test_firm_member_without_role_cannot_use_client_grant(client, user_a, org_a, org_b):
+    from apps.access.services import accept_accountant_invitation, create_accountant_invitation
+
+    client_owner = User.objects.create_user(email="role-client@example.com", password="pass12345!")
+    firm_employee = User.objects.create_user(email="unassigned-firm@example.com", password="pass12345!")
+    Membership.objects.create(user=client_owner, organization=org_b, status=Membership.Status.ACTIVE)
+    Membership.objects.create(user=firm_employee, organization=org_a, status=Membership.Status.ACTIVE)
+
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        _, token = create_accountant_invitation(
+            invited_by=user_a,
+            email=client_owner.email,
+            requested_permissions=["reports.report.view"],
+        )
+    accept_accountant_invitation(
+        token=token,
+        accepted_by=client_owner,
+        client_organization_id=org_b.id,
+        approved_permissions=["reports.report.view"],
+    )
+
+    client.force_login(firm_employee)
+    response = client.get("/api/v1/me/", HTTP_X_ORGANIZATION_ID=str(org_b.id))
+    assert response.status_code == 403
