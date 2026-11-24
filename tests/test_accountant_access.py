@@ -338,3 +338,44 @@ def test_firm_member_without_role_cannot_use_client_grant(client, user_a, org_a,
     client.force_login(firm_employee)
     response = client.get("/api/v1/me/", HTTP_X_ORGANIZATION_ID=str(org_b.id))
     assert response.status_code == 403
+
+
+
+@pytest.mark.django_db
+def test_existing_user_can_create_company_then_accept_accountant_invitation(
+    client, user_a, org_a
+):
+    client_owner = User.objects.create_user(
+        email="existing-owner@example.com",
+        password="pass12345!",
+    )
+    client.force_login(client_owner)
+    company_response = client.post(
+        "/api/v1/organizations/",
+        {"company_name": "Owner's New Business"},
+        content_type="application/json",
+    )
+    assert company_response.status_code == 201
+    client_org_id = company_response.json()["organization"]["id"]
+    assert client_owner.memberships.filter(
+        organization_id=client_org_id,
+        status=Membership.Status.ACTIVE,
+    ).exists()
+
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        _, token = create_accountant_invitation(
+            invited_by=user_a,
+            email=client_owner.email,
+            requested_permissions=["reports.report.view"],
+        )
+
+    grant = accept_accountant_invitation(
+        token=token,
+        accepted_by=client_owner,
+        client_organization_id=client_org_id,
+        approved_permissions=["reports.report.view"],
+    )
+    assert str(grant.organization_id) == client_org_id
+    assert grant.permissions == ["reports.report.view"]
