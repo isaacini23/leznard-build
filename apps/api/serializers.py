@@ -64,3 +64,10 @@ class AcceptAccountantInvitationSerializer(serializers.Serializer):
                 f"Unsupported permission codes: {', '.join(unknown)}"
             )
         return sorted(set(value))
+
+
+
+class CreateCompanySerializer(serializers.Serializer):
+    company_name = serializers.CharField(max_length=200)
+    country = serializers.CharField(max_length=2, default="NG")
+    base_currency = serializers.CharField(max_length=3, default="NGN")
