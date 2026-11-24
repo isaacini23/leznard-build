@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.core.tenancy import get_current_org_id, organization_context
@@ -133,28 +133,33 @@ def create_accountant_invitation(
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
     normalized_email = email.strip().lower()
-    with transaction.atomic(), organization_context(firm_id):
-        now = timezone.now()
-        previous = Invitation.objects.select_for_update().filter(
-            email=normalized_email,
-            kind=Invitation.Kind.ACCOUNTANT_CLIENT,
-            status=Invitation.Status.PENDING,
-        ).first()
-        if previous and previous.expires_at <= now:
-            previous.status = Invitation.Status.EXPIRED
-            previous.save(update_fields=["status", "updated_at"])
-            previous = None
-        if previous:
-            raise ValidationError({"email": "A pending invitation already exists for this email."})
+    try:
+        with transaction.atomic(), organization_context(firm_id):
+            now = timezone.now()
+            previous = Invitation.objects.select_for_update().filter(
+                email=normalized_email,
+                kind=Invitation.Kind.ACCOUNTANT_CLIENT,
+                status=Invitation.Status.PENDING,
+            ).first()
+            if previous and previous.expires_at <= now:
+                previous.status = Invitation.Status.EXPIRED
+                previous.save(update_fields=["status", "updated_at"])
+                previous = None
+            if previous:
+                raise ValidationError({"email": "A pending invitation already exists for this email."})
 
-        invitation = Invitation.objects.create(
-            email=normalized_email,
-            kind=Invitation.Kind.ACCOUNTANT_CLIENT,
-            requested_permissions=sorted(requested_permissions),
-            invited_by=invited_by,
-            token_hash=token_hash,
-            expires_at=now + timedelta(days=expires_in_days),
-        )
+            invitation = Invitation.objects.create(
+                email=normalized_email,
+                kind=Invitation.Kind.ACCOUNTANT_CLIENT,
+                requested_permissions=sorted(requested_permissions),
+                invited_by=invited_by,
+                token_hash=token_hash,
+                expires_at=now + timedelta(days=expires_in_days),
+            )
+    except IntegrityError:
+        # The conditional unique constraint is the final guard against two
+        # concurrent requests creating pending invitations for one recipient.
+        raise ValidationError({"email": "A pending invitation already exists for this email."})
     return invitation, token
 
 
