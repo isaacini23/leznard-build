@@ -229,3 +229,68 @@ def test_expired_accountant_invitation_is_marked_expired(user_a, org_a, org_b):
 
     with organization_context(org_a.id):
         assert invitation.__class__.objects.get(id=invitation.id).status == "expired"
+
+
+
+@pytest.mark.django_db
+def test_firm_can_revoke_pending_invitation(user_a, org_a):
+    from apps.access.services import revoke_accountant_invitation
+
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        invitation, token = create_accountant_invitation(
+            invited_by=user_a,
+            email="pending-client@example.com",
+            requested_permissions=["reports.report.view"],
+        )
+        revoked = revoke_accountant_invitation(
+            invitation_id=invitation.id,
+            revoked_by=user_a,
+        )
+        assert revoked.status == "revoked"
+
+        with pytest.raises(ValidationError):
+            accept_accountant_invitation(
+                token=token,
+                accepted_by=user_a,
+                client_organization_id=org_a.id,
+                approved_permissions=["reports.report.view"],
+            )
+
+
+@pytest.mark.django_db
+def test_duplicate_pending_accountant_invitation_is_rejected(user_a, org_a):
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        create_accountant_invitation(
+            invited_by=user_a,
+            email="duplicate@example.com",
+            requested_permissions=["reports.report.view"],
+        )
+        with pytest.raises(ValidationError):
+            create_accountant_invitation(
+                invited_by=user_a,
+                email="duplicate@example.com",
+                requested_permissions=["reports.report.view"],
+            )
+
+
+@pytest.mark.django_db
+def test_suspended_member_loses_role_permissions(user_a, org_a):
+    with organization_context(org_a.id):
+        create_default_roles(org_a)
+        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        user_a.memberships.update(status=Membership.Status.SUSPENDED)
+        assert get_permissions(user_a) == set()
+
+
+@pytest.mark.django_db
+def test_role_from_another_company_cannot_be_assigned(user_a, org_a, org_b):
+    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    with organization_context(org_a.id):
+        foreign_role = Role.objects.create(name="Foreign", permissions=["*"])
+    with organization_context(org_b.id):
+        with pytest.raises(ValidationError):
+            RoleAssignment.objects.create(user=user_a, role=foreign_role)
