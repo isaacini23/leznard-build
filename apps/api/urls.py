@@ -6,6 +6,7 @@ urlpatterns = [
     path("me/", views.MeView.as_view()),
     path("roles/", views.RoleListView.as_view()),
     path("register/", views.RegisterView.as_view()),
+    path("organizations/", views.CreateCompanyView.as_view()),
     path("login/", views.LoginView.as_view()),
     path("logout/", views.LogoutView.as_view()),
     path("accountant-invitations/", views.CreateAccountantInvitationView.as_view()),
