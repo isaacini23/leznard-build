@@ -6,12 +6,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.access.drf import require
-from apps.access.models import Role
+from apps.access.models import AccountantAccessGrant, Invitation, Role
 from apps.access.services import (
     accept_accountant_invitation,
     create_accountant_invitation,
     get_permissions,
     revoke_accountant_access,
+    revoke_accountant_invitation,
 )
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Membership
@@ -191,16 +192,35 @@ class RevokeAccountantAccessView(APIView):
             )
         except (PermissionDenied, DjangoValidationError) as exc:
             return _service_error_response(exc)
-        except Exception as exc:
-            from apps.access.models import AccountantAccessGrant
-
-            if isinstance(exc, AccountantAccessGrant.DoesNotExist):
-                return Response(
-                    {"error": {"message": "Access grant not found."}},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-            raise
+        except AccountantAccessGrant.DoesNotExist:
+            return Response(
+                {"error": {"message": "Access grant not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         return Response(
             {"grant_id": str(grant.id), "status": grant.status},
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class RevokeAccountantInvitationView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def post(self, request, invitation_id):
+        try:
+            invitation = revoke_accountant_invitation(
+                invitation_id=invitation_id,
+                revoked_by=request.user,
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        except Invitation.DoesNotExist:
+            return Response(
+                {"error": {"message": "Invitation not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {"invitation_id": str(invitation.id), "status": invitation.status},
             status=status.HTTP_200_OK,
         )
