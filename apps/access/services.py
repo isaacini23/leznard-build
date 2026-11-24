@@ -92,14 +92,28 @@ def create_accountant_invitation(
     token = f"{firm_id}.{secret}"
     token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
+    normalized_email = email.strip().lower()
     with transaction.atomic(), organization_context(firm_id):
+        now = timezone.now()
+        previous = Invitation.objects.select_for_update().filter(
+            email=normalized_email,
+            kind=Invitation.Kind.ACCOUNTANT_CLIENT,
+            status=Invitation.Status.PENDING,
+        ).first()
+        if previous and previous.expires_at <= now:
+            previous.status = Invitation.Status.EXPIRED
+            previous.save(update_fields=["status", "updated_at"])
+            previous = None
+        if previous:
+            raise ValidationError({"email": "A pending invitation already exists for this email."})
+
         invitation = Invitation.objects.create(
-            email=email.strip().lower(),
+            email=normalized_email,
             kind=Invitation.Kind.ACCOUNTANT_CLIENT,
             requested_permissions=sorted(set(requested_permissions)),
             invited_by=invited_by,
             token_hash=token_hash,
-            expires_at=timezone.now() + timedelta(days=expires_in_days),
+            expires_at=now + timedelta(days=expires_in_days),
         )
     return invitation, token
 
@@ -201,3 +215,26 @@ def revoke_accountant_access(*, grant_id, revoked_by):
         grant.revoked_at = timezone.now()
         grant.save()
     return grant
+
+
+
+def revoke_accountant_invitation(*, invitation_id, revoked_by):
+    firm_id = get_current_org_id()
+    if firm_id is None:
+        raise PermissionDenied("Select your accounting firm's organization first.")
+    if not _has_active_membership(revoked_by, firm_id):
+        raise PermissionDenied("Only an active firm member can revoke this invitation.")
+    if not has_permission(revoked_by, "access.user.invite", firm_id):
+        raise PermissionDenied("You do not have permission to manage invitations.")
+
+    with transaction.atomic():
+        invitation = Invitation.objects.select_for_update().get(id=invitation_id)
+        if invitation.status != Invitation.Status.PENDING:
+            raise ValidationError({"invitation": "Only pending invitations can be revoked."})
+        if invitation.expires_at <= timezone.now():
+            invitation.status = Invitation.Status.EXPIRED
+        else:
+            invitation.status = Invitation.Status.REVOKED
+            invitation.revoked_at = timezone.now()
+        invitation.save(update_fields=["status", "revoked_at", "updated_at"])
+    return invitation
