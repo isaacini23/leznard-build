@@ -70,3 +70,82 @@ class ChartOfAccountsTests(TestCase):
         account = Account.unscoped.get(organization=self.organization, code="1000")
         with self.assertRaises(ValidationError):
             account.delete()
+
+
+from datetime import date
+from decimal import Decimal
+
+from .models import JournalEntry, JournalLine
+from .services import create_journal_entry, post_journal_entry, reverse_journal_entry
+
+
+class JournalEntryTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Journal Test Business")
+        self.bank = Account.unscoped.get(organization=self.organization, code="1010")
+        self.sales = Account.unscoped.get(organization=self.organization, code="4000")
+
+    def make_journal(self, *, currency="NGN", exchange_rate=None, debit="100", credit="100"):
+        return create_journal_entry(
+            self.organization,
+            entry_date=date(2026, 11, 24),
+            description="Test transaction",
+            currency=currency,
+            exchange_rate=exchange_rate,
+            lines=[
+                {"account": self.bank, "debit": debit},
+                {"account": self.sales, "credit": credit},
+            ],
+        )
+
+    def test_base_currency_journal_uses_rate_one(self):
+        entry = self.make_journal()
+        self.assertEqual(entry.currency, "NGN")
+        self.assertEqual(entry.base_currency, "NGN")
+        self.assertEqual(entry.exchange_rate, Decimal("1"))
+
+    def test_foreign_currency_journal_stores_base_equivalents(self):
+        entry = self.make_journal(currency="USD", exchange_rate="1500")
+        debit_line = JournalLine.unscoped.get(entry=entry, account=self.bank)
+        self.assertEqual(debit_line.debit_amount, Decimal("100"))
+        self.assertEqual(debit_line.base_debit_amount, Decimal("150000.0000"))
+
+    def test_foreign_currency_requires_exchange_rate(self):
+        with self.assertRaises(ValidationError):
+            self.make_journal(currency="USD")
+
+    def test_unbalanced_journal_cannot_be_posted(self):
+        entry = self.make_journal(debit="100", credit="90")
+        with self.assertRaises(ValidationError):
+            post_journal_entry(entry)
+        self.assertEqual(
+            JournalEntry.unscoped.get(pk=entry.pk).status,
+            JournalEntry.Status.DRAFT,
+        )
+
+    def test_balanced_journal_can_be_posted_and_is_immutable(self):
+        entry = self.make_journal(currency="USD", exchange_rate="1500")
+        posted = post_journal_entry(entry)
+        self.assertEqual(posted.status, JournalEntry.Status.POSTED)
+        line = JournalLine.unscoped.filter(entry=entry).first()
+        line.description = "Attempted edit"
+        with self.assertRaises(ValidationError):
+            line.save()
+
+    def test_posted_journal_can_be_reversed_once(self):
+        entry = post_journal_entry(self.make_journal())
+        reversal = reverse_journal_entry(entry)
+        original = JournalEntry.unscoped.get(pk=entry.pk)
+        self.assertEqual(original.status, JournalEntry.Status.REVERSED)
+        self.assertEqual(reversal.status, JournalEntry.Status.POSTED)
+        self.assertEqual(reversal.reversal_of_id, entry.pk)
+        with self.assertRaises(ValidationError):
+            reverse_journal_entry(original)
+
+    def test_journal_entries_are_tenant_scoped(self):
+        other = Organization.objects.create(name="Other Journal Business")
+        entry = self.make_journal()
+        with organization_context(other.pk):
+            self.assertEqual(JournalEntry.objects.count(), 0)
+        with organization_context(self.organization.pk):
+            self.assertEqual(JournalEntry.objects.filter(pk=entry.pk).count(), 1)
