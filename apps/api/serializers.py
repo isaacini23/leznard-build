@@ -1,7 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from apps.access.permissions import PERMISSIONS
+from apps.access.permissions import ACCOUNTANT_GRANTABLE_PERMISSIONS
 from apps.accounts.models import User
 
 
@@ -36,12 +36,12 @@ class AccountantInvitationSerializer(serializers.Serializer):
     email = serializers.EmailField()
     requested_permissions = serializers.ListField(
         child=serializers.CharField(max_length=100),
-        allow_empty=True,
+        allow_empty=False,
     )
     expires_in_days = serializers.IntegerField(min_value=1, max_value=30, default=14)
 
     def validate_requested_permissions(self, value):
-        unknown = sorted(set(value) - set(PERMISSIONS))
+        unknown = sorted(set(value) - set(ACCOUNTANT_GRANTABLE_PERMISSIONS))
         if unknown:
             raise serializers.ValidationError(
                 f"Unsupported permission codes: {', '.join(unknown)}"
