@@ -244,8 +244,8 @@ class JournalLine(TenantModel):
     description = models.CharField(max_length=255, blank=True)
     debit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     credit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
-    base_debit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
-    base_credit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    base_debit_amount = models.DecimalField(max_digits=28, decimal_places=10, default=0)
+    base_credit_amount = models.DecimalField(max_digits=28, decimal_places=10, default=0)
 
     class Meta:
         ordering = ["created_at", "id"]
