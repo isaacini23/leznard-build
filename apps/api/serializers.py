@@ -1,6 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
+from apps.access.permissions import PERMISSIONS
 from apps.accounts.models import User
 
 
@@ -29,3 +30,37 @@ class RegisterSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+
+class AccountantInvitationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    requested_permissions = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        allow_empty=True,
+    )
+    expires_in_days = serializers.IntegerField(min_value=1, max_value=30, default=14)
+
+    def validate_requested_permissions(self, value):
+        unknown = sorted(set(value) - set(PERMISSIONS))
+        if unknown:
+            raise serializers.ValidationError(
+                f"Unsupported permission codes: {', '.join(unknown)}"
+            )
+        return sorted(set(value))
+
+
+class AcceptAccountantInvitationSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    client_organization_id = serializers.UUIDField()
+    approved_permissions = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        allow_empty=True,
+    )
+
+    def validate_approved_permissions(self, value):
+        unknown = sorted(set(value) - set(PERMISSIONS))
+        if unknown:
+            raise serializers.ValidationError(
+                f"Unsupported permission codes: {', '.join(unknown)}"
+            )
+        return sorted(set(value))
