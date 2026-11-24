@@ -17,10 +17,11 @@ from apps.access.services import (
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Membership
 
-from .registration import register_company
+from .registration import create_company_for_user, register_company
 from .serializers import (
     AcceptAccountantInvitationSerializer,
     AccountantInvitationSerializer,
+    CreateCompanySerializer,
     LoginSerializer,
     RegisterSerializer,
 )
@@ -272,4 +273,28 @@ class AccountantAccessGrantListView(APIView):
                 }
                 for grant in grants
             ]
+        )
+
+
+
+class CreateCompanyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateCompanySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        organization = create_company_for_user(
+            user=request.user,
+            **serializer.validated_data,
+        )
+        return Response(
+            {
+                "organization": {
+                    "id": str(organization.id),
+                    "name": organization.name,
+                    "country": organization.country,
+                    "base_currency": organization.base_currency,
+                }
+            },
+            status=status.HTTP_201_CREATED,
         )
