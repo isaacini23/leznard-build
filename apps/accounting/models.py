@@ -163,3 +163,122 @@ class Account(TenantModel):
         if self.is_system:
             raise ValidationError("System accounts cannot be deleted.")
         return super().delete(*args, **kwargs)
+
+
+
+class JournalEntry(TenantModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        POSTED = "posted", "Posted"
+        REVERSED = "reversed", "Reversed"
+
+    entry_date = models.DateField()
+    reference = models.CharField(max_length=50, blank=True)
+    description = models.CharField(max_length=255)
+    currency = models.CharField(max_length=3)
+    base_currency = models.CharField(max_length=3)
+    exchange_rate = models.DecimalField(max_digits=24, decimal_places=10, default=1)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.DRAFT
+    )
+    posted_at = models.DateTimeField(null=True, blank=True)
+    posted_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="posted_journal_entries",
+    )
+    reversal_of = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reversal_entry",
+    )
+
+    class Meta:
+        ordering = ["-entry_date", "-created_at"]
+
+    def __str__(self):
+        return self.reference or f"Journal {self.pk}"
+
+    def clean(self):
+        super().clean()
+        if self.currency:
+            self.currency = self.currency.upper()
+        if self.base_currency:
+            self.base_currency = self.base_currency.upper()
+        if self.currency and len(self.currency) != 3:
+            raise ValidationError({"currency": "Use a three-letter currency code."})
+        if self.base_currency and len(self.base_currency) != 3:
+            raise ValidationError({"base_currency": "Use a three-letter currency code."})
+        if self.exchange_rate is None or self.exchange_rate <= 0:
+            raise ValidationError({"exchange_rate": "Exchange rate must be greater than zero."})
+        if self.currency == self.base_currency and self.exchange_rate != 1:
+            raise ValidationError(
+                {"exchange_rate": "The exchange rate must be 1 for the base currency."}
+            )
+        if self.reversal_of_id and self.organization_id:
+            if self.reversal_of.organization_id != self.organization_id:
+                raise ValidationError(
+                    {"reversal_of": "A journal can only reverse an entry from the same company."}
+                )
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            existing = type(self).unscoped.filter(pk=self.pk).first()
+            if existing and existing.status != self.Status.DRAFT:
+                raise ValidationError("Posted or reversed journal entries cannot be edited.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class JournalLine(TenantModel):
+    entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, related_name="lines"
+    )
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, related_name="journal_lines"
+    )
+    description = models.CharField(max_length=255, blank=True)
+    debit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    credit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    base_debit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    base_credit_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.account} ({self.entry})"
+
+    def clean(self):
+        super().clean()
+        if self.entry_id and self.organization_id != self.entry.organization_id:
+            raise ValidationError({"entry": "Journal line and entry must belong to the same company."})
+        if self.account_id and self.organization_id != self.account.organization_id:
+            raise ValidationError({"account": "Account must belong to the same company as the journal."})
+        if self.entry_id and self.entry.status != JournalEntry.Status.DRAFT:
+            raise ValidationError("Lines on posted or reversed entries cannot be changed.")
+        debit = self.debit_amount or 0
+        credit = self.credit_amount or 0
+        if debit < 0 or credit < 0:
+            raise ValidationError("Debit and credit amounts cannot be negative.")
+        if (debit > 0) == (credit > 0):
+            raise ValidationError("Each journal line must contain either a debit or a credit, not both.")
+        if debit == 0 and credit == 0:
+            raise ValidationError("A journal line must have a positive debit or credit amount.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            existing = type(self).unscoped.filter(pk=self.pk).first()
+            if existing and existing.entry.status != JournalEntry.Status.DRAFT:
+                raise ValidationError("Lines on posted or reversed entries cannot be edited.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.entry.status != JournalEntry.Status.DRAFT:
+            raise ValidationError("Lines on posted or reversed entries cannot be deleted.")
+        return super().delete(*args, **kwargs)
