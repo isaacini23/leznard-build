@@ -149,3 +149,25 @@ class JournalEntryTests(TestCase):
             self.assertEqual(JournalEntry.objects.count(), 0)
         with organization_context(self.organization.pk):
             self.assertEqual(JournalEntry.objects.filter(pk=entry.pk).count(), 1)
+
+
+    def test_foreign_currency_conversion_preserves_balanced_base_totals(self):
+        cash = Account.unscoped.get(organization=self.organization, code="1000")
+        entry = create_journal_entry(
+            self.organization,
+            entry_date=date(2026, 11, 24),
+            description="Small foreign-currency transaction",
+            currency="USD",
+            exchange_rate="1.5",
+            lines=[
+                {"account": self.bank, "debit": "0.0001"},
+                {"account": cash, "debit": "0.0001"},
+                {"account": self.sales, "credit": "0.0002"},
+            ],
+        )
+        posted = post_journal_entry(entry)
+        self.assertEqual(posted.status, JournalEntry.Status.POSTED)
+        lines = JournalLine.unscoped.filter(entry=entry)
+        base_debits = sum((line.base_debit_amount for line in lines), Decimal("0"))
+        base_credits = sum((line.base_credit_amount for line in lines), Decimal("0"))
+        self.assertEqual(base_debits, base_credits)
