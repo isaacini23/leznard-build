@@ -2,7 +2,7 @@ import uuid
 
 from django.http import JsonResponse
 
-from apps.access.models import AccountantAccessGrant
+from apps.access.services import has_accountant_access
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Membership
 
@@ -39,14 +39,9 @@ class TenantMiddleware:
                 status=Membership.Status.ACTIVE,
             ).exists()
 
-            has_accountant_grant = False
-            if not is_member:
-                has_accountant_grant = AccountantAccessGrant.objects.filter(
-                    organization_id=org_id,
-                    status=AccountantAccessGrant.Status.ACTIVE,
-                    accountant_organization__memberships__user=request.user,
-                    accountant_organization__memberships__status=Membership.Status.ACTIVE,
-                ).exists()
+            has_accountant_grant = (
+                False if is_member else has_accountant_access(request.user, org_id)
+            )
 
             if not (is_member or has_accountant_grant):
                 return _deny("You do not have access to this organization.", 403)
