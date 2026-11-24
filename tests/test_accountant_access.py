@@ -99,26 +99,31 @@ def test_client_cannot_approve_permissions_not_requested(user_a, org_a, org_b):
 
 @pytest.mark.django_db
 def test_client_owner_can_revoke_accountant_access(user_a, org_a, org_b):
-    Membership.objects.create(user=user_a, organization=org_b, status=Membership.Status.ACTIVE)
+    firm_user = user_a
+    Membership.objects.create(user=firm_user, organization=org_b, status=Membership.Status.ACTIVE)
+    client_owner = User.objects.create_user(email="owner-revoke@example.com", password="pass12345!")
+    Membership.objects.create(user=client_owner, organization=org_b, status=Membership.Status.ACTIVE)
+
     with organization_context(org_a.id):
         create_default_roles(org_a)
-        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
+        RoleAssignment.objects.create(user=firm_user, role=Role.objects.get(name="Administrator"))
         _, token = create_accountant_invitation(
-            invited_by=user_a,
-            email=user_a.email,
+            invited_by=firm_user,
+            email=client_owner.email,
             requested_permissions=["reports.report.view"],
         )
     grant = accept_accountant_invitation(
         token=token,
-        accepted_by=user_a,
+        accepted_by=client_owner,
         client_organization_id=org_b.id,
         approved_permissions=["reports.report.view"],
     )
     with organization_context(org_b.id):
         create_default_roles(org_b)
-        RoleAssignment.objects.create(user=user_a, role=Role.objects.get(name="Administrator"))
-        revoke_accountant_access(grant_id=grant.id, revoked_by=user_a)
-        assert not get_permissions(user_a) == {"reports.report.view"}
+        RoleAssignment.objects.create(user=client_owner, role=Role.objects.get(name="Administrator"))
+        assert get_permissions(firm_user) == {"reports.report.view"}
+        revoke_accountant_access(grant_id=grant.id, revoked_by=client_owner)
+        assert get_permissions(firm_user) == set()
         assert AccountantAccessGrant.objects.get(id=grant.id).status == "revoked"
 
 
