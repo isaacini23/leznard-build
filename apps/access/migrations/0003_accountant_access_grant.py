@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
                     base_field=models.CharField(max_length=100), blank=True, default=list, size=None
                 )),
                 ("status", models.CharField(
-                    choices=[("active", "Active"), ("revoked", "Revoked)],
+                    choices=[("active", "Active"), ("revoked", "Revoked")],
                     default="active",
                     max_length=10,
                 )),
