@@ -12,7 +12,7 @@ The product direction includes a desktop application for day-to-day users and a 
 
 ## API
 
-The versioned API is rooted at `/api/v1/`. Contacts endpoints, permissions, filters, pagination and examples are documented in [the Contacts API guide](docs/api/contacts.md).
+The versioned API is rooted at `/api/v1/`. Contacts endpoints, permissions, filters, pagination and examples are documented in [the Contacts API guide](docs/api/contacts.md). Sales invoice and purchase bill endpoints are documented in [the Sales and Purchases API guide](docs/api/sales-purchases.md).
 
 API requests that access organization-owned data must include an authenticated session and the `X-Organization-ID` header. See the API guide for the Contacts endpoint contract.
 
