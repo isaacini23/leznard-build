@@ -29,10 +29,9 @@ class SalesInvoiceListCreateView(APIView):
         return Response(SalesInvoiceSerializer(queryset.order_by("-document_date", "-created_at"), many=True, context={"organization_id": get_current_org_id()}).data)
 
     def post(self, request):
-        if not request.user.has_perm("sales.invoice.manage"):
-            from apps.access.services import has_permission
-            if not has_permission(request.user, "sales.invoice.manage", organization_id=get_current_org_id()):
-                return Response({"detail": "You do not have permission to manage sales invoices."}, status=403)
+        from apps.access.services import has_permission
+        if not has_permission(request.user, "sales.invoice.manage", organization_id=get_current_org_id()):
+            return Response({"detail": "You do not have permission to manage sales invoices."}, status=403)
         serializer = SalesInvoiceSerializer(data=request.data, context={"organization_id": get_current_org_id()})
         serializer.is_valid(raise_exception=True)
         try:
