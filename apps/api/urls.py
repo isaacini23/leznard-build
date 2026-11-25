@@ -33,4 +33,5 @@ urlpatterns = [
     path("reports/trial-balance/", views.TrialBalanceView.as_view()),
     path("reports/income-statement/", views.IncomeStatementView.as_view()),
     path("", include("apps.contacts.urls")),
+    path("", include("apps.sales.urls")),
 ]
