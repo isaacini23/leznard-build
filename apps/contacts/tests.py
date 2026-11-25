@@ -82,10 +82,11 @@ class ContactRoleTests(TestCase):
                 role=ContactRole.Role.SUPPLIER,
             )
 
-        self.assertEqual(
-            set(self.contact.roles.values_list("role", flat=True)),
-            {ContactRole.Role.CUSTOMER, ContactRole.Role.SUPPLIER},
-        )
+        with organization_context(self.organization.pk):
+            self.assertEqual(
+                set(self.contact.roles.values_list("role", flat=True)),
+                {ContactRole.Role.CUSTOMER, ContactRole.Role.SUPPLIER},
+            )
         self.assertEqual(customer.organization_id, self.organization.pk)
         self.assertEqual(supplier.organization_id, self.organization.pk)
 
