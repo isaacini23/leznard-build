@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import TenantModel
+from apps.core.tenancy import get_current_org_id
 
 
 MONEY = Decimal("0.0001")
@@ -54,6 +55,8 @@ class FinancialDocument(TenantModel):
             raise ValidationError({"exchange_rate": "Exchange rate must be 1 for the company's base currency."})
 
     def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         if self.pk and not self._state.adding:
             old = type(self).unscoped.get(pk=self.pk)
             if old.status != self.Status.DRAFT:
@@ -140,6 +143,8 @@ class SalesInvoiceLine(TenantModel):
             raise ValidationError({"discount_amount": "Discount cannot exceed the line's gross amount."})
 
     def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -216,6 +221,8 @@ class PurchaseBillLine(TenantModel):
             raise ValidationError({"discount_amount": "Discount cannot exceed the line's gross amount."})
 
     def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         self.full_clean()
         super().save(*args, **kwargs)
 
