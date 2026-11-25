@@ -147,7 +147,11 @@ def test_inviter_cannot_grant_more_access_than_they_have():
     owner, org_id = register_owner()
     with organization_context(org_id):
         limited = Role.objects.create(
-            name="Invite only", permissions=["access.user.invite", "properties.property.view"]
+            name="Invite only", permissions=[
+                "access.user.invite",
+                "properties.property.view",
+                "contacts.contact.view",
+            ]
         )
     token = invite(owner, org_id, "lead@example.com", "Employee").json()["token"]
     # give the new person the limited role by hand, then try to escalate
@@ -219,4 +223,7 @@ def test_permissions_follow_the_active_company_for_a_user_in_two_companies():
     in_b = client.get("/api/v1/me/", HTTP_X_ORGANIZATION_ID=org_b_id).json()["permissions"]
     in_a = client.get("/api/v1/me/", HTTP_X_ORGANIZATION_ID=org_a_id).json()["permissions"]
     assert "*" in in_b          # Administrator of their own company
-    assert in_a == ["properties.property.view"]  # only an Employee in the other
+    assert in_a == [
+        "contacts.contact.view",
+        "properties.property.view",
+    ]  # Employee permissions in the other company
