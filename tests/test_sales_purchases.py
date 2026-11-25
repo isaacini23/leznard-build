@@ -9,9 +9,8 @@ from apps.accounting.services import create_default_chart_of_accounts
 from apps.contacts.models import Contact, ContactRole
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Organization
-
-from .models import PurchaseBill, PurchaseBillLine, SalesInvoice, SalesInvoiceLine
-from .services import post_purchase_bill, post_sales_invoice
+from apps.sales.models import PurchaseBill, PurchaseBillLine, SalesInvoice, SalesInvoiceLine
+from apps.sales.services import post_purchase_bill, post_sales_invoice
 
 
 class SalesPurchaseDocumentTests(TestCase):
