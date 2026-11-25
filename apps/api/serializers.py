@@ -71,3 +71,16 @@ class CreateCompanySerializer(serializers.Serializer):
     company_name = serializers.CharField(max_length=200)
     country = serializers.CharField(max_length=2, default="NG")
     base_currency = serializers.CharField(max_length=3, default="NGN")
+
+
+class MemberInvitationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role = serializers.UUIDField(source="role_id")
+    expires_in_days = serializers.IntegerField(required=False, default=7)
+
+
+class AcceptMemberInvitationSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    full_name = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
