@@ -138,7 +138,8 @@ class ContactAddressTests(TestCase):
             state="Akwa Ibom",
         )
 
-        self.assertEqual(self.contact.addresses.count(), 2)
+        with organization_context(self.organization.pk):
+            self.assertEqual(self.contact.addresses.count(), 2)
         self.assertNotEqual(office.pk, site.pk)
 
     def test_only_one_default_address_is_allowed_per_contact(self):
@@ -157,7 +158,8 @@ class ContactAddressTests(TestCase):
             is_default=False,
         )
 
-        self.assertEqual(self.contact.addresses.count(), 2)
+        with organization_context(self.organization.pk):
+            self.assertEqual(self.contact.addresses.count(), 2)
 
     def test_address_cannot_reference_another_organizations_contact(self):
         with organization_context(self.other_organization.pk):
