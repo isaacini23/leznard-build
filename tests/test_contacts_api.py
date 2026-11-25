@@ -3,9 +3,9 @@ from rest_framework.test import APIClient
 
 from apps.access.models import Role, RoleAssignment
 from apps.accounts.models import User
-from apps.contacts.models import Contact, ContactAddress, ContactRole
+from apps.contacts.models import Contact
 from apps.core.tenancy import organization_context
-from apps.organizations.models import Membership
+from apps.organizations.models import Membership, Organization
 
 pytestmark = pytest.mark.django_db
 
@@ -32,7 +32,7 @@ def org_headers(organization):
 
 
 def test_create_and_retrieve_individual_and_business_contacts(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contacts-owner@example.com", "Contacts Company"
     )
     headers = org_headers(organization)
@@ -77,7 +77,7 @@ def test_create_and_retrieve_individual_and_business_contacts(client):
 
 
 def test_contact_update_and_soft_deactivation_preserve_history(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contact-history@example.com", "History Company"
     )
     headers = org_headers(organization)
@@ -122,10 +122,7 @@ def test_contact_update_and_soft_deactivation_preserve_history(client):
     deleted = client.delete(f"/api/v1/contacts/{contact_id}/", **headers)
     assert deleted.status_code == 204
 
-    inactive = client.get(
-        f"/api/v1/contacts/{contact_id}/",
-        **headers,
-    )
+    inactive = client.get(f"/api/v1/contacts/{contact_id}/", **headers)
     assert inactive.status_code == 200
     assert inactive.json()["is_active"] is False
     assert len(inactive.json()["roles"]) == 1
@@ -133,7 +130,7 @@ def test_contact_update_and_soft_deactivation_preserve_history(client):
 
 
 def test_contact_search_filters_and_pagination(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contact-search@example.com", "Search Company"
     )
     headers = org_headers(organization)
@@ -160,7 +157,7 @@ def test_contact_search_filters_and_pagination(client):
 
 
 def test_contact_roles_can_be_added_listed_and_removed(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contact-roles@example.com", "Roles Company"
     )
     headers = org_headers(organization)
@@ -196,7 +193,7 @@ def test_contact_roles_can_be_added_listed_and_removed(client):
 
 
 def test_contact_addresses_can_be_created_updated_and_removed(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contact-addresses@example.com", "Addresses Company"
     )
     headers = org_headers(organization)
@@ -240,7 +237,7 @@ def test_contact_addresses_can_be_created_updated_and_removed(client):
 
 
 def test_duplicate_roles_and_default_addresses_are_rejected(client):
-    user, organization = register_company(
+    _, organization = register_company(
         client, "contact-validation@example.com", "Validation Company"
     )
     headers = org_headers(organization)
@@ -289,7 +286,7 @@ def test_duplicate_roles_and_default_addresses_are_rejected(client):
 
 
 def test_employee_can_read_but_cannot_manage_contacts(client):
-    owner, organization = register_company(
+    _, organization = register_company(
         client, "contact-permissions@example.com", "Permissions Company"
     )
     headers = org_headers(organization)
@@ -328,22 +325,17 @@ def test_employee_can_read_but_cannot_manage_contacts(client):
 
 
 def test_contact_data_is_not_visible_to_another_organization(client):
-    owner_a, org_a = register_company(
-        client, "tenant-a@example.com", "Tenant A"
-    )
-    headers_a = org_headers(org_a)
+    _, org_a = register_company(client, "tenant-a@example.com", "Tenant A")
     created = client.post(
         "/api/v1/contacts/",
         {"display_name": "Private Tenant A Contact"},
         content_type="application/json",
-        **headers_a,
+        **org_headers(org_a),
     )
     contact_id = created.json()["id"]
 
     other_client = APIClient()
-    owner_b, org_b = register_company(
-        other_client, "tenant-b@example.com", "Tenant B"
-    )
+    _, org_b = register_company(other_client, "tenant-b@example.com", "Tenant B")
     response = other_client.get(
         f"/api/v1/contacts/{contact_id}/",
         **org_headers(org_b),
@@ -351,21 +343,16 @@ def test_contact_data_is_not_visible_to_another_organization(client):
     assert response.status_code == 404
 
 
-def test_contacts_require_an_authenticated_selected_organization(client):
-    response = client.get("/api/v1/contacts/")
-    assert response.status_code in (401, 403)
+def test_contacts_require_authentication_and_selected_organization(client):
+    assert client.get("/api/v1/contacts/").status_code in (401, 403)
 
-    user, organization = register_company(
-        client, "no-org-header@example.com", "No Header Company"
-    )
+    register_company(client, "no-org-header@example.com", "No Header Company")
     response = client.get("/api/v1/contacts/")
     assert response.status_code == 403
 
 
-def test_admin_contact_list_uses_authenticated_tenant_context(client, db):
-    organization = __import__(
-        "apps.organizations.models", fromlist=["Organization"]
-    ).Organization.objects.create(name="Admin Tenant")
+def test_admin_contact_list_uses_authenticated_tenant_context(client):
+    organization = Organization.objects.create(name="Admin Tenant")
     admin_user = User.objects.create_user(
         email="contacts-admin@example.com",
         password="Str0ng-pass-123",

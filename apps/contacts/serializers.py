@@ -55,24 +55,7 @@ class ContactSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
-    def validate(self, attrs):
-        contact_type = attrs.get(
-            "contact_type",
-            getattr(self.instance, "contact_type", Contact.ContactType.INDIVIDUAL),
-        )
-        display_name = attrs.get(
-            "display_name",
-            getattr(self.instance, "display_name", ""),
-        )
-        if not display_name.strip():
-            raise serializers.ValidationError(
-                {"display_name": "A contact name is required."}
-            )
-        if contact_type == Contact.ContactType.INDIVIDUAL:
-            legal_name = attrs.get(
-                "legal_name",
-                getattr(self.instance, "legal_name", ""),
-            )
-            if legal_name:
-                attrs.setdefault("legal_name", "")
-        return attrs
+    def validate_display_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("A contact name is required.")
+        return value.strip()

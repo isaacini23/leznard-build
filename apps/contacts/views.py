@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -15,6 +17,35 @@ from .serializers import (
     ContactRoleSerializer,
     ContactSerializer,
 )
+
+
+def _save_serializer(serializer):
+    try:
+        return serializer.save()
+    except DjangoValidationError as exc:
+        detail = getattr(exc, "message_dict", None) or getattr(
+            exc, "messages", [str(exc)]
+        )
+        raise ValidationError(detail)
+    except IntegrityError:
+        raise ValidationError(
+            {"detail": "A conflicting contact role or address already exists."}
+        )
+
+
+def _save_model(instance):
+    try:
+        instance.save()
+        return instance
+    except DjangoValidationError as exc:
+        detail = getattr(exc, "message_dict", None) or getattr(
+            exc, "messages", [str(exc)]
+        )
+        raise ValidationError(detail)
+    except IntegrityError:
+        raise ValidationError(
+            {"detail": "A conflicting contact role or address already exists."}
+        )
 
 
 class ContactListCreateView(APIView):
@@ -76,7 +107,7 @@ class ContactListCreateView(APIView):
     def post(self, request):
         serializer = ContactSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        contact = serializer.save()
+        contact = _save_serializer(serializer)
         return Response(
             ContactSerializer(contact).data,
             status=status.HTTP_201_CREATED,
@@ -109,7 +140,7 @@ class ContactDetailView(APIView):
             partial=partial,
         )
         serializer.is_valid(raise_exception=True)
-        contact = serializer.save()
+        contact = _save_serializer(serializer)
         return Response(ContactSerializer(contact).data)
 
     def delete(self, request, contact_id):
@@ -117,7 +148,7 @@ class ContactDetailView(APIView):
         contact = self.get_object(contact_id)
         if contact.is_active:
             contact.is_active = False
-            contact.save(update_fields=("is_active", "updated_at"))
+            _save_model(contact)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -142,7 +173,7 @@ class ContactRoleListCreateView(APIView):
             role=serializer.validated_data["role"],
             organization_id=get_current_org_id(),
         )
-        role.save()
+        _save_model(role)
         return Response(
             ContactRoleSerializer(role).data,
             status=status.HTTP_201_CREATED,
@@ -181,7 +212,7 @@ class ContactAddressListCreateView(APIView):
             organization_id=get_current_org_id(),
             **serializer.validated_data,
         )
-        address.save()
+        _save_model(address)
         return Response(
             ContactAddressSerializer(address).data,
             status=status.HTTP_201_CREATED,
@@ -206,7 +237,7 @@ class ContactAddressDetailView(APIView):
             partial=True,
         )
         serializer.is_valid(raise_exception=True)
-        address = serializer.save()
+        address = _save_serializer(serializer)
         return Response(ContactAddressSerializer(address).data)
 
     def delete(self, request, contact_id, address_id):
