@@ -46,7 +46,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "apps.api",
     "apps.accounts",
-   
+    "apps.contacts",
     "apps.accounting"
 ]
 
