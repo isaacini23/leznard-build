@@ -16,6 +16,8 @@ from apps.access.services import (
     revoke_accountant_access,
     revoke_accountant_invitation,
 )
+from apps.accounting.models import AccountingPeriod
+from apps.accounting.periods import close_period, reopen_period
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Membership
 
@@ -370,3 +372,45 @@ class AcceptMemberInvitationView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+def _period_payload(period):
+    return {
+        "id": str(period.id),
+        "name": period.name,
+        "start_date": period.start_date,
+        "end_date": period.end_date,
+        "status": period.status,
+        "closed_at": period.closed_at,
+        "reopened_at": period.reopened_at,
+    }
+
+
+class PeriodListView(APIView):
+    permission_classes = [IsAuthenticated, require("accounting.journal.view")]
+
+    def get(self, request):
+        return Response([_period_payload(p) for p in AccountingPeriod.objects.order_by("-start_date")])
+
+
+class _PeriodActionView(APIView):
+    permission_classes = [IsAuthenticated, require("accounting.period.close")]
+    action = None
+
+    def post(self, request, period_id):
+        try:
+            period = self.action(period_id, **{self.actor: request.user})
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        return Response(_period_payload(period))
+
+
+class ClosePeriodView(_PeriodActionView):
+    action = staticmethod(close_period)
+    actor = "closed_by"
+
+
+class ReopenPeriodView(_PeriodActionView):
+    action = staticmethod(reopen_period)
+    actor = "reopened_by"
+

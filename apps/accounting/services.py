@@ -2,6 +2,7 @@ from django.db import transaction
 
 from apps.core.tenancy import organization_context
 
+from .periods import assert_period_open
 from .models import Account
 
 
@@ -164,6 +165,7 @@ def post_journal_entry(entry, *, posted_by=None):
         locked = JournalEntry.unscoped.select_for_update().get(pk=entry.pk)
         if locked.status != JournalEntry.Status.DRAFT:
             raise ValidationError("Only draft journal entries can be posted.")
+        assert_period_open(locked.entry_date)
 
         lines = list(
             JournalLine.unscoped.select_related("account").filter(entry=locked)
