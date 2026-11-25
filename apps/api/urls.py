@@ -21,4 +21,10 @@ urlpatterns = [
         "accountant-access/<uuid:grant_id>/revoke/",
         views.RevokeAccountantAccessView.as_view(),
     ),
+    path("invitations/", views.MemberInvitationListCreateView.as_view()),
+    path("invitations/accept/", views.AcceptMemberInvitationView.as_view()),
+    path(
+        "invitations/<uuid:invitation_id>/revoke/",
+        views.RevokeAccountantInvitationView.as_view(),
+    ),
 ]

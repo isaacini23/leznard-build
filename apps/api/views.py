@@ -9,7 +9,9 @@ from apps.access.drf import require
 from apps.access.models import AccountantAccessGrant, Invitation, Role
 from apps.access.services import (
     accept_accountant_invitation,
+    accept_member_invitation,
     create_accountant_invitation,
+    create_member_invitation,
     get_permissions,
     revoke_accountant_access,
     revoke_accountant_invitation,
@@ -20,9 +22,11 @@ from apps.organizations.models import Membership
 from .registration import create_company_for_user, register_company
 from .serializers import (
     AcceptAccountantInvitationSerializer,
+    AcceptMemberInvitationSerializer,
     AccountantInvitationSerializer,
     CreateCompanySerializer,
     LoginSerializer,
+    MemberInvitationSerializer,
     RegisterSerializer,
 )
 
@@ -232,7 +236,9 @@ class AccountantInvitationListView(APIView):
     permission_classes = [IsAuthenticated, require("access.user.invite")]
 
     def get(self, request):
-        invitations = Invitation.objects.order_by("-created_at")
+        invitations = Invitation.objects.filter(
+            kind=Invitation.Kind.ACCOUNTANT_CLIENT
+        ).order_by("-created_at")
         return Response(
             [
                 {
@@ -295,6 +301,72 @@ class CreateCompanyView(APIView):
                     "country": organization.country,
                     "base_currency": organization.base_currency,
                 }
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class MemberInvitationListCreateView(APIView):
+    permission_classes = [IsAuthenticated, require("access.user.invite")]
+
+    def get(self, request):
+        invitations = (
+            Invitation.objects.filter(kind=Invitation.Kind.MEMBER)
+            .select_related("role")
+            .order_by("-created_at")
+        )
+        return Response(
+            [
+                {
+                    "id": str(item.id),
+                    "email": item.email,
+                    "role": item.role.name if item.role else None,
+                    "status": item.status,
+                    "expires_at": item.expires_at,
+                    "accepted_at": item.accepted_at,
+                }
+                for item in invitations
+            ]
+        )
+
+    def post(self, request):
+        serializer = MemberInvitationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invitation, token = create_member_invitation(
+                invited_by=request.user, **serializer.validated_data
+            )
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        return Response(
+            {
+                "invitation_id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role.name,
+                "expires_at": invitation.expires_at,
+                # The raw token is returned once; only its hash is stored.
+                "token": token,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AcceptMemberInvitationView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = AcceptMemberInvitationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user, organization = accept_member_invitation(**serializer.validated_data)
+        except (PermissionDenied, DjangoValidationError) as exc:
+            return _service_error_response(exc)
+        login(request._request, user)
+        return Response(
+            {
+                "user": {"id": str(user.id), "email": user.email},
+                "organization": {"id": str(organization.id), "name": organization.name},
             },
             status=status.HTTP_201_CREATED,
         )

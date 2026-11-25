@@ -3,10 +3,12 @@ import secrets
 import uuid
 from datetime import timedelta
 
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.accounts.models import User
 from apps.core.tenancy import get_current_org_id, organization_context
 from apps.organizations.models import Membership
 
@@ -289,3 +291,139 @@ def revoke_accountant_invitation(*, invitation_id, revoked_by):
             invitation.revoked_at = timezone.now()
         invitation.save(update_fields=["status", "revoked_at", "updated_at"])
     return invitation
+
+
+# ---- staff (member) invitations ----------------------------------------------
+
+
+def _token_parts(token):
+    try:
+        org_text, secret = token.split(".", 1)
+        return uuid.UUID(org_text), secret
+    except (AttributeError, TypeError, ValueError):
+        raise ValidationError({"token": "This invitation link is invalid."})
+
+
+def create_member_invitation(*, invited_by, email, role_id, expires_in_days=7):
+    """Invite someone to the active company with one of its roles.
+
+    Returns (invitation, raw_token). Only a hash of the secret is stored.
+    """
+    org_id = get_current_org_id()
+    if org_id is None:
+        raise PermissionDenied("Select a company first.")
+    if not _has_active_membership(invited_by, org_id):
+        raise PermissionDenied("You must be an active member of this company.")
+    granted = get_permissions(invited_by, org_id)
+    if ALL not in granted and "access.user.invite" not in granted:
+        raise PermissionDenied("You do not have permission to invite people.")
+    if not 1 <= expires_in_days <= 30:
+        raise ValidationError({"expires_in_days": "Invitation expiry must be between 1 and 30 days."})
+
+    role = Role.objects.filter(id=role_id).first()
+    if role is None:
+        raise ValidationError({"role": "Choose one of this company's roles."})
+    # Nobody can hand out more access than they hold themselves.
+    if ALL not in granted and not set(role.permissions) <= granted:
+        raise PermissionDenied("You cannot invite someone to a role with more access than your own.")
+
+    normalized_email = email.strip().lower()
+    if Membership.objects.filter(
+        organization_id=org_id,
+        user__email=normalized_email,
+        status=Membership.Status.ACTIVE,
+    ).exists():
+        raise ValidationError({"email": "This person is already a member of the company."})
+
+    secret = secrets.token_urlsafe(32)
+    token = f"{org_id}.{secret}"
+    token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    try:
+        with transaction.atomic():
+            now = timezone.now()
+            previous = Invitation.objects.select_for_update().filter(
+                email=normalized_email,
+                kind=Invitation.Kind.MEMBER,
+                status=Invitation.Status.PENDING,
+            ).first()
+            if previous and previous.expires_at <= now:
+                previous.status = Invitation.Status.EXPIRED
+                previous.save(update_fields=["status", "updated_at"])
+                previous = None
+            if previous:
+                raise ValidationError({"email": "A pending invitation already exists for this email."})
+            invitation = Invitation.objects.create(
+                email=normalized_email,
+                kind=Invitation.Kind.MEMBER,
+                role=role,
+                invited_by=invited_by,
+                token_hash=token_hash,
+                expires_at=now + timedelta(days=expires_in_days),
+            )
+    except IntegrityError:
+        raise ValidationError({"email": "A pending invitation already exists for this email."})
+    return invitation, token
+
+
+def accept_member_invitation(*, token, password, full_name=""):
+    """Turn a valid staff invitation into a membership and role.
+
+    A new person creates their account here. Someone who already has an account
+    proves it with their password. Returns (user, organization).
+    """
+    org_id, secret = _token_parts(token)
+    token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    invalid = ValidationError({"token": "This invitation is invalid or has expired."})
+    expired = False
+    with transaction.atomic(), organization_context(org_id):
+        invitation = (
+            Invitation.objects.select_for_update(of=("self",))
+            .select_related("role", "organization")
+            .filter(token_hash=token_hash, kind=Invitation.Kind.MEMBER)
+            .first()
+        )
+        if invitation is None or invitation.status != Invitation.Status.PENDING:
+            raise invalid
+        if invitation.expires_at <= timezone.now():
+            invitation.status = Invitation.Status.EXPIRED
+            invitation.save(update_fields=["status", "updated_at"])
+            expired = True
+        else:
+            organization = invitation.organization
+            user = User.objects.filter(email=invitation.email).first()
+            if user is not None:
+                if not user.check_password(password):
+                    raise ValidationError({"password": "That password does not match the existing account."})
+            else:
+                if not full_name.strip():
+                    raise ValidationError({"full_name": "Please enter your full name."})
+                validate_password(password, user=User(email=invitation.email, full_name=full_name))
+                user = User.objects.create_user(
+                    email=invitation.email, password=password, full_name=full_name.strip()
+                )
+
+            membership, created = Membership.objects.get_or_create(
+                user=user, organization=organization
+            )
+            if not created:
+                if membership.status == Membership.Status.SUSPENDED:
+                    raise PermissionDenied("This account is suspended in the company.")
+                if membership.status == Membership.Status.ACTIVE and RoleAssignment.objects.filter(
+                    user=user
+                ).exists():
+                    raise ValidationError({"email": "This person is already a member of the company."})
+                membership.status = Membership.Status.ACTIVE
+                membership.save(update_fields=["status"])
+
+            RoleAssignment.objects.update_or_create(user=user, defaults={"role": invitation.role})
+            invitation.status = Invitation.Status.ACCEPTED
+            # accepted_organization is only for accountant-client invitations;
+            # a staff invitation's company is its own organization.
+            invitation.accepted_by = user
+            invitation.accepted_at = timezone.now()
+            invitation.save(
+                update_fields=["status", "accepted_by", "accepted_at", "updated_at"]
+            )
+    if expired:
+        raise ValidationError({"token": "This invitation has expired."})
+    return user, organization
