@@ -18,6 +18,7 @@ from apps.access.services import (
 )
 from apps.accounting.models import AccountingPeriod
 from apps.accounting.periods import close_period, reopen_period
+from apps.accounting.reports import income_statement, trial_balance
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Membership
 
@@ -413,4 +414,53 @@ class ClosePeriodView(_PeriodActionView):
 class ReopenPeriodView(_PeriodActionView):
     action = staticmethod(reopen_period)
     actor = "reopened_by"
+
+
+def _plain(value):
+    """Money as strings, so no precision is lost in JSON."""
+    from decimal import Decimal
+
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _parse_date(raw, field):
+    from datetime import date
+
+    try:
+        return date.fromisoformat(raw)
+    except (TypeError, ValueError):
+        raise DjangoValidationError({field: "Use a date like 2026-03-31."})
+
+
+class TrialBalanceView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            as_of = _parse_date(request.query_params.get("as_of"), "as_of")
+        except DjangoValidationError as exc:
+            return _service_error_response(exc)
+        return Response(_plain(trial_balance(as_of=as_of)))
+
+
+class IncomeStatementView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            start = _parse_date(request.query_params.get("start"), "start")
+            end = _parse_date(request.query_params.get("end"), "end")
+            if end < start:
+                raise DjangoValidationError({"end": "The end date cannot be before the start date."})
+        except DjangoValidationError as exc:
+            return _service_error_response(exc)
+        return Response(_plain(income_statement(start_date=start, end_date=end)))
 
