@@ -28,7 +28,9 @@ class ContactAdminPermissionMixin:
         )
 
     def has_view_permission(self, request, obj=None):
-        return self._allowed(request, "contacts.contact.view")
+        return self._allowed(
+            request, "contacts.contact.view"
+        ) or self._allowed(request, "contacts.contact.manage")
 
     def has_add_permission(self, request):
         return self._allowed(request, "contacts.contact.manage")

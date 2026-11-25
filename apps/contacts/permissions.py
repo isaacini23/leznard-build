@@ -14,13 +14,20 @@ class ContactAccessPermission(BasePermission):
         if organization_id is None:
             return False
 
-        code = (
-            "contacts.contact.view"
-            if request.method in SAFE_METHODS
-            else "contacts.contact.manage"
-        )
+        if request.method in SAFE_METHODS:
+            # Managing records necessarily includes being able to read them.
+            return has_permission(
+                request.user,
+                "contacts.contact.view",
+                organization_id=organization_id,
+            ) or has_permission(
+                request.user,
+                "contacts.contact.manage",
+                organization_id=organization_id,
+            )
+
         return has_permission(
             request.user,
-            code,
+            "contacts.contact.manage",
             organization_id=organization_id,
         )

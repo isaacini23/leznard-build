@@ -79,12 +79,19 @@ class TenantMiddleware:
 
             if is_admin_request and request.path.startswith("/admin/contacts/"):
                 if not request.user.is_superuser:
-                    code = (
-                        "contacts.contact.view"
-                        if request.method in {"GET", "HEAD", "OPTIONS"}
-                        else "contacts.contact.manage"
+                    can_view = (
+                        user_has_permission(request.user, "contacts.contact.view", org_id)
+                        or user_has_permission(request.user, "contacts.contact.manage", org_id)
                     )
-                    if not user_has_permission(request.user, code, org_id):
+                    can_manage = user_has_permission(
+                        request.user, "contacts.contact.manage", org_id
+                    )
+                    allowed = (
+                        can_view
+                        if request.method in {"GET", "HEAD", "OPTIONS"}
+                        else can_manage
+                    )
+                    if not allowed:
                         return _deny(
                             "You do not have permission to manage contacts in this organization.",
                             403,
