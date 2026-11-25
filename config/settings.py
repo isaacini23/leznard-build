@@ -47,7 +47,8 @@ INSTALLED_APPS = [
     "apps.api",
     "apps.accounts",
     "apps.contacts",
-    "apps.accounting"
+    "apps.accounting",
+    "apps.sales"
 ]
 
 MIDDLEWARE = [
