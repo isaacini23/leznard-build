@@ -1,15 +1,54 @@
 from django.contrib import admin
 
+from apps.access.services import has_permission
+from apps.core.tenancy import get_current_org_id
+
 from .models import Contact, ContactAddress, ContactRole
 
 
-class ContactRoleInline(admin.TabularInline):
+class ContactAdminPermissionMixin:
+    """Use Leznard contact permissions rather than Django's unrelated model perms."""
+
+    def _allowed(self, request, code):
+        if request.user.is_superuser:
+            return True
+        organization_id = get_current_org_id()
+        return bool(
+            organization_id
+            and has_permission(
+                request.user,
+                code,
+                organization_id=organization_id,
+            )
+        )
+
+    def has_module_permission(self, request):
+        return self._allowed(request, "contacts.contact.view") or self._allowed(
+            request, "contacts.contact.manage"
+        )
+
+    def has_view_permission(self, request, obj=None):
+        return self._allowed(
+            request, "contacts.contact.view"
+        ) or self._allowed(request, "contacts.contact.manage")
+
+    def has_add_permission(self, request):
+        return self._allowed(request, "contacts.contact.manage")
+
+    def has_change_permission(self, request, obj=None):
+        return self._allowed(request, "contacts.contact.manage")
+
+    def has_delete_permission(self, request, obj=None):
+        return self._allowed(request, "contacts.contact.manage")
+
+
+class ContactRoleInline(ContactAdminPermissionMixin, admin.TabularInline):
     model = ContactRole
     extra = 0
     fields = ("role",)
 
 
-class ContactAddressInline(admin.TabularInline):
+class ContactAddressInline(ContactAdminPermissionMixin, admin.TabularInline):
     model = ContactAddress
     extra = 0
     fields = (
@@ -25,13 +64,14 @@ class ContactAddressInline(admin.TabularInline):
 
 
 @admin.register(Contact)
-class ContactAdmin(admin.ModelAdmin):
+class ContactAdmin(ContactAdminPermissionMixin, admin.ModelAdmin):
     list_display = (
         "display_name",
         "contact_type",
         "email",
         "phone",
         "is_active",
+        "updated_at",
     )
     list_filter = ("contact_type", "is_active")
     search_fields = (
@@ -46,6 +86,7 @@ class ContactAdmin(admin.ModelAdmin):
     ordering = ("display_name",)
     readonly_fields = ("organization", "id", "created_at", "updated_at")
     inlines = (ContactRoleInline, ContactAddressInline)
+    actions = ("deactivate_contacts", "activate_contacts")
 
     fieldsets = (
         (
@@ -75,9 +116,27 @@ class ContactAdmin(admin.ModelAdmin):
         ),
     )
 
+    # Contacts are deactivated, not hard-deleted, to preserve business history.
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.action(description="Deactivate selected contacts")
+    def deactivate_contacts(self, request, queryset):
+        for contact in queryset:
+            if contact.is_active:
+                contact.is_active = False
+                contact.save(update_fields=("is_active", "updated_at"))
+
+    @admin.action(description="Reactivate selected contacts")
+    def activate_contacts(self, request, queryset):
+        for contact in queryset:
+            if not contact.is_active:
+                contact.is_active = True
+                contact.save(update_fields=("is_active", "updated_at"))
+
 
 @admin.register(ContactRole)
-class ContactRoleAdmin(admin.ModelAdmin):
+class ContactRoleAdmin(ContactAdminPermissionMixin, admin.ModelAdmin):
     list_display = ("contact", "role", "organization")
     list_filter = ("role",)
     search_fields = ("contact__display_name", "contact__email")
@@ -85,7 +144,7 @@ class ContactRoleAdmin(admin.ModelAdmin):
 
 
 @admin.register(ContactAddress)
-class ContactAddressAdmin(admin.ModelAdmin):
+class ContactAddressAdmin(ContactAdminPermissionMixin, admin.ModelAdmin):
     list_display = (
         "contact",
         "address_type",
