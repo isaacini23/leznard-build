@@ -371,3 +371,50 @@ def test_admin_contact_list_uses_authenticated_tenant_context(client):
     response = client.get("/admin/contacts/contact/")
     assert response.status_code == 200
     assert b"Visible Admin Contact" in response.content
+
+
+def test_admin_requires_explicit_organization_when_user_has_multiple(client):
+    user = User.objects.create_user(
+        email="multi-org-admin@example.com",
+        password="Str0ng-pass-123",
+        is_staff=True,
+        is_superuser=True,
+    )
+    first = Organization.objects.create(name="First Admin Company")
+    second = Organization.objects.create(name="Second Admin Company")
+    Membership.objects.create(user=user, organization=first)
+    Membership.objects.create(user=user, organization=second)
+    client.force_login(user)
+
+    ambiguous = client.get("/admin/contacts/contact/")
+    assert ambiguous.status_code == 400
+
+    selected = client.get(
+        f"/admin/contacts/contact/?organization_id={first.id}"
+    )
+    assert selected.status_code == 200
+
+
+def test_admin_enforces_read_only_contact_permission_for_accountant_staff(client):
+    organization = Organization.objects.create(name="Accountant Admin Tenant")
+    user = User.objects.create_user(
+        email="accountant-admin@example.com",
+        password="Str0ng-pass-123",
+        is_staff=True,
+    )
+    Membership.objects.create(user=user, organization=organization)
+    with organization_context(organization.id):
+        from apps.access.models import Role
+
+        role = Role.objects.create(
+            name="Accountant",
+            permissions=["contacts.contact.view"],
+        )
+        RoleAssignment.objects.create(user=user, role=role)
+        Contact.objects.create(display_name="Accountant Visible Contact")
+
+    client.force_login(user)
+    listing = client.get("/admin/contacts/contact/")
+    assert listing.status_code == 200
+    denied = client.post("/admin/contacts/contact/add/", {})
+    assert denied.status_code == 403

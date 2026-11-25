@@ -9,7 +9,7 @@ All endpoints are under `/api/v1/`. The API uses the authenticated Django sessio
 
 The default Manager and Property officer roles can manage contacts. Accountant, Employee and Auditor roles have read-only contact access. Administrator retains all permissions.
 
-Existing organizations created before these permissions were introduced may need their role permissions updated by an administrator in Django admin. New organizations receive the updated defaults.
+These defaults are assigned when a new organization is created. Existing organizations created before these permissions were introduced may need their role permissions updated by an administrator in Django admin.
 
 ## Contacts
 
@@ -81,7 +81,7 @@ Address fields: `address_type`, `street_address`, `address_line_2`, `city`, `sta
 
 Every API query is scoped by the active organization. A contact ID from another organization returns 404 rather than exposing whether the record exists. Related roles and addresses are also constrained to the parent contact and active organization.
 
-The Django admin uses the organization selected by the authenticated application session. A user with exactly one active membership is automatically scoped to it. A user with multiple memberships must first select an organization in the application; the admin will not guess which company's records should be shown.
+The Django admin uses the organization selected by the authenticated application session. A user with exactly one active membership is automatically scoped to it. For multiple memberships, open the admin URL with `?organization_id=<company-id>`; the middleware validates membership or accountant access and remembers the selection in the session. The Contacts admin additionally enforces the contact view/manage permission, including for staff users with accountant access.
 
 ## Error responses
 

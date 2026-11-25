@@ -2,7 +2,10 @@ import uuid
 
 from django.http import JsonResponse
 
-from apps.access.services import has_accountant_access
+from apps.access.services import (
+    has_accountant_access,
+    has_permission as user_has_permission,
+)
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Membership
 
@@ -27,13 +30,16 @@ class TenantMiddleware:
 
     def __call__(self, request):
         raw = request.META.get(ORG_HEADER)
-
-        # Django admin uses the organization selected by the authenticated
-        # application session. A single-membership user can be routed safely
-        # without an extra selection step.
         is_admin_request = request.path.startswith("/admin/")
+
+        # The admin accepts an explicit organization_id once, then keeps that
+        # selection in the authenticated session. Membership/grant validation
+        # still happens below, so this parameter cannot grant access by itself.
         if not raw and is_admin_request and request.user.is_authenticated:
-            raw = request.session.get("active_organization_id")
+            raw = (
+                request.GET.get("organization_id")
+                or request.session.get("active_organization_id")
+            )
             if not raw:
                 memberships = list(
                     Membership.objects.filter(
@@ -45,7 +51,7 @@ class TenantMiddleware:
                     raw = str(memberships[0])
                 elif len(memberships) > 1:
                     return _deny(
-                        "Select an active organization in Leznard before using the admin.",
+                        "Choose an organization by adding ?organization_id=<company-id> to this admin URL.",
                         400,
                     )
                 else:
@@ -70,6 +76,19 @@ class TenantMiddleware:
         with organization_context(org_id):
             if not self._has_access(request.user, org_id):
                 return _deny("You do not have access to this organization.", 403)
+
+            if is_admin_request and request.path.startswith("/admin/contacts/"):
+                if not request.user.is_superuser:
+                    code = (
+                        "contacts.contact.view"
+                        if request.method in {"GET", "HEAD", "OPTIONS"}
+                        else "contacts.contact.manage"
+                    )
+                    if not user_has_permission(request.user, code, org_id):
+                        return _deny(
+                            "You do not have permission to manage contacts in this organization.",
+                            403,
+                        )
 
             if hasattr(request, "session"):
                 request.session["active_organization_id"] = str(org_id)
