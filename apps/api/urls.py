@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 
 from . import views
 
@@ -32,4 +32,5 @@ urlpatterns = [
     path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
     path("reports/trial-balance/", views.TrialBalanceView.as_view()),
     path("reports/income-statement/", views.IncomeStatementView.as_view()),
+    path("", include("apps.contacts.urls")),
 ]

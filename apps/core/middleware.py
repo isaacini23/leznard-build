@@ -17,8 +17,43 @@ class TenantMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    def _has_access(self, user, organization_id):
+        is_member = Membership.objects.filter(
+            user=user,
+            organization_id=organization_id,
+            status=Membership.Status.ACTIVE,
+        ).exists()
+        return is_member or has_accountant_access(user, organization_id)
+
     def __call__(self, request):
         raw = request.META.get(ORG_HEADER)
+
+        # Django admin uses the organization selected by the authenticated
+        # application session. A single-membership user can be routed safely
+        # without an extra selection step.
+        is_admin_request = request.path.startswith("/admin/")
+        if not raw and is_admin_request and request.user.is_authenticated:
+            raw = request.session.get("active_organization_id")
+            if not raw:
+                memberships = list(
+                    Membership.objects.filter(
+                        user=request.user,
+                        status=Membership.Status.ACTIVE,
+                    ).values_list("organization_id", flat=True)[:2]
+                )
+                if len(memberships) == 1:
+                    raw = str(memberships[0])
+                elif len(memberships) > 1:
+                    return _deny(
+                        "Select an active organization in Leznard before using the admin.",
+                        400,
+                    )
+                else:
+                    return _deny(
+                        "An active organization membership is required to access company data.",
+                        403,
+                    )
+
         if not raw:
             return self.get_response(request)
 
@@ -26,24 +61,17 @@ class TenantMiddleware:
             return _deny("Authentication required.", 401)
 
         try:
-            org_id = uuid.UUID(raw)
+            org_id = uuid.UUID(str(raw))
         except (TypeError, ValueError, AttributeError):
             return _deny("You do not have access to this organization.", 403)
 
         # The context is established before checking the grant because grants
         # are tenant-owned by the client organization and protected by RLS.
         with organization_context(org_id):
-            is_member = Membership.objects.filter(
-                user=request.user,
-                organization_id=org_id,
-                status=Membership.Status.ACTIVE,
-            ).exists()
-
-            has_accountant_grant = (
-                False if is_member else has_accountant_access(request.user, org_id)
-            )
-
-            if not (is_member or has_accountant_grant):
+            if not self._has_access(request.user, org_id):
                 return _deny("You do not have access to this organization.", 403)
+
+            if hasattr(request, "session"):
+                request.session["active_organization_id"] = str(org_id)
 
             return self.get_response(request)

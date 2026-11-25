@@ -32,6 +32,7 @@ class ContactAdmin(admin.ModelAdmin):
         "email",
         "phone",
         "is_active",
+        "updated_at",
     )
     list_filter = ("contact_type", "is_active")
     search_fields = (
@@ -46,6 +47,7 @@ class ContactAdmin(admin.ModelAdmin):
     ordering = ("display_name",)
     readonly_fields = ("organization", "id", "created_at", "updated_at")
     inlines = (ContactRoleInline, ContactAddressInline)
+    actions = ("deactivate_contacts", "activate_contacts")
 
     fieldsets = (
         (
@@ -74,6 +76,20 @@ class ContactAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    @admin.action(description="Deactivate selected contacts")
+    def deactivate_contacts(self, request, queryset):
+        for contact in queryset:
+            if contact.is_active:
+                contact.is_active = False
+                contact.save(update_fields=("is_active", "updated_at"))
+
+    @admin.action(description="Reactivate selected contacts")
+    def activate_contacts(self, request, queryset):
+        for contact in queryset:
+            if not contact.is_active:
+                contact.is_active = True
+                contact.save(update_fields=("is_active", "updated_at"))
 
 
 @admin.register(ContactRole)
