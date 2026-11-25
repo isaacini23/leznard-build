@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
 
 from apps.core.models import TenantModel
@@ -57,6 +57,8 @@ class FinancialDocument(TenantModel):
     def save(self, *args, **kwargs):
         if self.organization_id is None:
             self.organization_id = get_current_org_id()
+        if self.organization_id is None:
+            raise PermissionDenied("No active organization; refusing to save a financial document.")
         if self.pk and not self._state.adding:
             old = type(self).unscoped.get(pk=self.pk)
             if old.status != self.Status.DRAFT:
@@ -145,6 +147,8 @@ class SalesInvoiceLine(TenantModel):
     def save(self, *args, **kwargs):
         if self.organization_id is None:
             self.organization_id = get_current_org_id()
+        if self.organization_id is None:
+            raise PermissionDenied("No active organization; refusing to save a document line.")
         self.full_clean()
         super().save(*args, **kwargs)
 
