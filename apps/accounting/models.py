@@ -282,3 +282,62 @@ class JournalLine(TenantModel):
         if self.entry.status != JournalEntry.Status.DRAFT:
             raise ValidationError("Lines on posted or reversed entries cannot be deleted.")
         return super().delete(*args, **kwargs)
+
+
+class AccountingPeriod(TenantModel):
+    """A date range that can be open or closed to posting.
+
+    Periods are created on demand (calendar months) the first time something is
+    posted into them. Posting into a closed period is refused.
+    """
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        CLOSED = "closed", "Closed"
+
+    name = models.CharField(max_length=50)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    reopened_at = models.DateTimeField(null=True, blank=True)
+    reopened_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-start_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "start_date"], name="one_period_per_start_date"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(end_date__gte=models.F("start_date")),
+                name="period_end_not_before_start",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
+
+    def clean(self):
+        super().clean()
+        if self.start_date and self.end_date:
+            if self.end_date < self.start_date:
+                raise ValidationError({"end_date": "The period cannot end before it starts."})
+            overlapping = type(self).unscoped.filter(
+                organization_id=self.organization_id or get_current_org_id(),
+                start_date__lte=self.end_date,
+                end_date__gte=self.start_date,
+            )
+            if self.pk:
+                overlapping = overlapping.exclude(pk=self.pk)
+            if overlapping.exists():
+                raise ValidationError("This period overlaps another accounting period.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

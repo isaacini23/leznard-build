@@ -27,4 +27,7 @@ urlpatterns = [
         "invitations/<uuid:invitation_id>/revoke/",
         views.RevokeAccountantInvitationView.as_view(),
     ),
+    path("periods/", views.PeriodListView.as_view()),
+    path("periods/<uuid:period_id>/close/", views.ClosePeriodView.as_view()),
+    path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
 ]
