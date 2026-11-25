@@ -30,4 +30,6 @@ urlpatterns = [
     path("periods/", views.PeriodListView.as_view()),
     path("periods/<uuid:period_id>/close/", views.ClosePeriodView.as_view()),
     path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
+    path("reports/trial-balance/", views.TrialBalanceView.as_view()),
+    path("reports/income-statement/", views.IncomeStatementView.as_view()),
 ]
