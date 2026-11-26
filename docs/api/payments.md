@@ -36,7 +36,7 @@ A payment may be allocated across multiple posted documents. Allocation totals c
 - `GET /api/v1/payments/{id}/` — retrieve a payment and its allocations.
 - `POST /api/v1/payments/{id}/post/` — post to the general ledger.
 
-Posting a customer receipt debits the selected cash/bank account and credits accounts receivable. Posting a supplier payment debits accounts payable and credits the selected cash/bank account. Posted payments and their allocations are immutable. Posting respects the payment currency, exchange rate, and open accounting period.
+Posting a customer receipt debits the selected cash/bank account and credits accounts receivable. Posting a supplier payment debits accounts payable and credits the selected cash/bank account. Posted payments and their allocations are immutable. Posting respects the payment currency, exchange rate, and open accounting period. For allocations, the payment exchange rate must equal the linked invoice or bill rate; realized foreign-exchange gain/loss handling is intentionally deferred so the ledger does not silently misstate settlement differences.
 
 Permissions: `payments.payment.view`, `payments.payment.manage`, and `payments.payment.post`. Managers can record drafts; accountants can post; auditors can view.
 
