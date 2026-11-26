@@ -6,6 +6,7 @@ from rest_framework import serializers
 from apps.accounting.models import Account
 from apps.contacts.models import Contact
 from apps.payments.models import Payment, PaymentAllocation
+from apps.properties.models import Property
 
 from .models import PurchaseBill, PurchaseBillLine, SalesInvoice, SalesInvoiceLine
 
@@ -121,7 +122,7 @@ class PurchaseBillSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseBill
-        fields = ("id", "number", "supplier", "supplier_reference", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
+        fields = ("id", "number", "supplier", "supplier_reference", "property", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
         read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at", "amount_paid", "amount_due", "payment_status")
 
     def get_amount_paid(self, obj):
@@ -138,6 +139,9 @@ class PurchaseBillSerializer(serializers.ModelSerializer):
         org_id = self.context.get("organization_id")
         if org_id:
             self.fields["supplier"].queryset = Contact.unscoped.filter(organization_id=org_id, is_active=True)
+            self.fields["property"].queryset = Property.unscoped.filter(organization_id=org_id)
+        else:
+            self.fields["property"].queryset = Property.unscoped.none()
 
     def create(self, validated_data):
         lines = validated_data.pop("lines")
