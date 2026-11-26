@@ -8,6 +8,47 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+
+def copy_legacy_property_owners(apps, schema_editor):
+    Property = apps.get_model("properties", "Property")
+    PropertyOwnership = apps.get_model("properties", "PropertyOwnership")
+    db = schema_editor.connection.alias
+
+    legacy_properties = (
+        Property.objects.using(db)
+        .exclude(owner_id__isnull=True)
+        .values_list("id", "organization_id", "owner_id")
+        .iterator()
+    )
+    for property_id, organization_id, owner_id in legacy_properties:
+        PropertyOwnership.objects.using(db).get_or_create(
+            property_id=property_id,
+            owner_id=owner_id,
+            defaults={
+                "organization_id": organization_id,
+                "share_percent": Decimal("100.00"),
+            },
+        )
+
+
+def restore_legacy_property_owners(apps, schema_editor):
+    Property = apps.get_model("properties", "Property")
+    PropertyOwnership = apps.get_model("properties", "PropertyOwnership")
+    db = schema_editor.connection.alias
+
+    for ownership in (
+        PropertyOwnership.objects.using(db)
+        .filter(share_percent=Decimal("100.00"))
+        .order_by("created_at")
+        .values("property_id", "owner_id")
+        .iterator()
+    ):
+        Property.objects.using(db).filter(
+            pk=ownership["property_id"],
+            owner_id__isnull=True,
+        ).update(owner_id=ownership["owner_id"])
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -18,10 +59,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="property",
-            name="owner",
-        ),
         migrations.AddField(
             model_name="property",
             name="tenure",
@@ -328,6 +365,14 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["property__name", "-start_date"],
             },
+        ),
+        migrations.RunPython(
+            copy_legacy_property_owners,
+            restore_legacy_property_owners,
+        ),
+        migrations.RemoveField(
+            model_name="property",
+            name="owner",
         ),
         migrations.CreateModel(
             name="Tenancy",
