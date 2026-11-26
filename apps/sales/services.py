@@ -50,7 +50,7 @@ def post_sales_invoice(invoice, *, posted_by=None):
             description=f"Sales invoice {locked.number}", reference=locked.number,
             currency=locked.currency, exchange_rate=locked.exchange_rate, lines=journal_lines,
         )
-        post_journal_entry(journal, posted_by=posted_by)
+        journal = post_journal_entry(journal, posted_by=posted_by)
         locked.status = SalesInvoice.Status.POSTED
         locked.journal_entry = journal
         locked.posted_at = timezone.now()
@@ -83,7 +83,7 @@ def post_purchase_bill(bill, *, posted_by=None):
             description=f"Purchase bill {locked.number}", reference=locked.number,
             currency=locked.currency, exchange_rate=locked.exchange_rate, lines=journal_lines,
         )
-        post_journal_entry(journal, posted_by=posted_by)
+        journal = post_journal_entry(journal, posted_by=posted_by)
         locked.status = PurchaseBill.Status.POSTED
         locked.journal_entry = journal
         locked.posted_at = timezone.now()
