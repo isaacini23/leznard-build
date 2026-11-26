@@ -38,4 +38,5 @@ urlpatterns = [
     path("units/<uuid:pk>/", property_views.UnitDetailView.as_view()),
     path("", include("apps.contacts.urls")),
     path("", include("apps.sales.urls")),
+    path("", include("apps.payments.urls")),
 ]

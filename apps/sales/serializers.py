@@ -1,9 +1,29 @@
+from decimal import Decimal
+
+from django.db.models import Sum
 from rest_framework import serializers
 
 from apps.accounting.models import Account
 from apps.contacts.models import Contact
+from apps.payments.models import Payment, PaymentAllocation
 
 from .models import PurchaseBill, PurchaseBillLine, SalesInvoice, SalesInvoiceLine
+
+
+def _document_paid(document, document_field):
+    return PaymentAllocation.unscoped.filter(
+        **{document_field: document, "payment__status": Payment.Status.POSTED}
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.0000")
+
+
+def _payment_status(document, paid):
+    if document.status != document.Status.POSTED:
+        return "not_posted"
+    if paid <= 0:
+        return "unpaid"
+    if paid >= document.total:
+        return "paid"
+    return "partially_paid"
 
 
 class SalesInvoiceLineSerializer(serializers.ModelSerializer):
@@ -46,11 +66,23 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     tax_total = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     total = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
+    amount_paid = serializers.SerializerMethodField()
+    amount_due = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesInvoice
-        fields = ("id", "number", "customer", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "journal_entry", "posted_at", "created_at", "updated_at")
-        read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at")
+        fields = ("id", "number", "customer", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
+        read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at", "amount_paid", "amount_due", "payment_status")
+
+    def get_amount_paid(self, obj):
+        return _document_paid(obj, "sales_invoice")
+
+    def get_amount_due(self, obj):
+        return max(obj.total - self.get_amount_paid(obj), Decimal("0.0000"))
+
+    def get_payment_status(self, obj):
+        return _payment_status(obj, self.get_amount_paid(obj))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -83,11 +115,23 @@ class PurchaseBillSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     tax_total = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     total = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
+    amount_paid = serializers.SerializerMethodField()
+    amount_due = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseBill
-        fields = ("id", "number", "supplier", "supplier_reference", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "journal_entry", "posted_at", "created_at", "updated_at")
-        read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at")
+        fields = ("id", "number", "supplier", "supplier_reference", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
+        read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at", "amount_paid", "amount_due", "payment_status")
+
+    def get_amount_paid(self, obj):
+        return _document_paid(obj, "purchase_bill")
+
+    def get_amount_due(self, obj):
+        return max(obj.total - self.get_amount_paid(obj), Decimal("0.0000"))
+
+    def get_payment_status(self, obj):
+        return _payment_status(obj, self.get_amount_paid(obj))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
