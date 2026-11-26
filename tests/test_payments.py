@@ -67,8 +67,8 @@ class PaymentWorkflowTests(TestCase):
             self.assertEqual(sum((x.debit_amount for x in lines), Decimal("0")), Decimal("400"))
             self.assertEqual(sum((x.credit_amount for x in lines), Decimal("0")), Decimal("400"))
             data = SalesInvoiceSerializer(invoice, context={"organization_id": self.org.pk}).data
-            self.assertEqual(data["amount_paid"], "400.0000")
-            self.assertEqual(data["amount_due"], "600.0000")
+            self.assertEqual(data["amount_paid"], Decimal("400"))
+            self.assertEqual(data["amount_due"], Decimal("600"))
             self.assertEqual(data["payment_status"], "partially_paid")
 
     def test_supplier_payment_allocates_to_purchase_bill(self):
@@ -84,8 +84,8 @@ class PaymentWorkflowTests(TestCase):
             self.assertEqual(sum((x.debit_amount for x in lines), Decimal("0")), Decimal("300"))
             self.assertEqual(sum((x.credit_amount for x in lines), Decimal("0")), Decimal("300"))
             data = PurchaseBillSerializer(bill, context={"organization_id": self.org.pk}).data
-            self.assertEqual(data["amount_paid"], "300.0000")
-            self.assertEqual(data["amount_due"], "500.0000")
+            self.assertEqual(data["amount_paid"], Decimal("300"))
+            self.assertEqual(data["amount_due"], Decimal("500"))
             self.assertEqual(data["payment_status"], "partially_paid")
 
     def test_payment_cannot_allocate_more_than_invoice_outstanding(self):
