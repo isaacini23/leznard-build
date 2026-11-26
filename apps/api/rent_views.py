@@ -41,7 +41,7 @@ class RentScheduleSerializer(serializers.ModelSerializer):
 
 
 class RentChargeSerializer(serializers.ModelSerializer):
-    invoice_id = serializers.UUIDField(source="invoice_id", read_only=True)
+    invoice_id = serializers.UUIDField(read_only=True)
     invoice_number = serializers.CharField(source="invoice.number", read_only=True)
     invoice_status = serializers.CharField(source="invoice.status", read_only=True)
     document_date = serializers.DateField(source="invoice.document_date", read_only=True)
