@@ -3,7 +3,7 @@ from django.db import transaction
 
 from apps.core.tenancy import get_current_org_id
 
-from .models import Tenancy, Unit
+from .models import Property, Tenancy, Unit
 
 
 @transaction.atomic
@@ -17,8 +17,12 @@ def activate_tenancy(tenancy_id):
     unit = Unit.objects.select_for_update().get(pk=tenancy.unit_id)
     if Tenancy.objects.filter(unit=unit, status=Tenancy.Status.ACTIVE).exists():
         raise ValidationError({"unit": "This unit already has an active tenancy."})
+    if unit.property.status != Property.Status.ACTIVE:
+        raise ValidationError({"unit": "A tenancy cannot start in an inactive or sold property."})
     if unit.occupancy_status == Unit.Occupancy.MAINTENANCE:
         raise ValidationError({"unit": "This unit is under maintenance."})
+    if unit.occupancy_status != Unit.Occupancy.VACANT:
+        raise ValidationError({"unit": "Only a vacant unit can be assigned a new tenancy."})
     tenancy.status = Tenancy.Status.ACTIVE
     tenancy.save()
     unit.occupancy_status = Unit.Occupancy.OCCUPIED
