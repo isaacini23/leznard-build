@@ -30,7 +30,7 @@ def post_payment(payment, *, posted_by=None):
 
         allocations = list(
             PaymentAllocation.unscoped.select_for_update().filter(payment=locked)
-            .select_related("sales_invoice", "purchase_bill")
+            
         )
         allocated_total = sum((item.amount for item in allocations), Decimal("0"))
         if allocated_total > locked.amount:
