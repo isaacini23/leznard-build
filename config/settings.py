@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "apps.contacts",
     "apps.accounting",
     "apps.sales",
+    "apps.properties",
     "apps.payments",
 ]
 
