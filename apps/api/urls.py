@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import views
+from . import property_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -32,6 +32,10 @@ urlpatterns = [
     path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
     path("reports/trial-balance/", views.TrialBalanceView.as_view()),
     path("reports/income-statement/", views.IncomeStatementView.as_view()),
+    path("properties/", property_views.PropertyListCreateView.as_view()),
+    path("properties/<uuid:pk>/", property_views.PropertyDetailView.as_view()),
+    path("properties/<uuid:property_id>/units/", property_views.PropertyUnitsView.as_view()),
+    path("units/<uuid:pk>/", property_views.UnitDetailView.as_view()),
     path("", include("apps.contacts.urls")),
     path("", include("apps.sales.urls")),
 ]
