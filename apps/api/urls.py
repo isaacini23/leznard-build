@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import property_reports, property_views, rent_views, views
+from . import accounting_views, property_reports, property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -27,6 +27,14 @@ urlpatterns = [
         "invitations/<uuid:invitation_id>/revoke/",
         views.RevokeAccountantInvitationView.as_view(),
     ),
+    path("accounts/", accounting_views.AccountListCreateView.as_view()),
+    path("accounts/<uuid:pk>/", accounting_views.AccountDetailView.as_view()),
+    path("journals/", accounting_views.JournalListCreateView.as_view()),
+    path("journals/<uuid:pk>/", accounting_views.JournalDetailView.as_view()),
+    path("journals/<uuid:pk>/post/", accounting_views.JournalPostView.as_view()),
+    path("journals/<uuid:pk>/reverse/", accounting_views.JournalReverseView.as_view()),
+    path("reports/general-ledger/", accounting_views.GeneralLedgerView.as_view()),
+    path("reports/account-balances/", accounting_views.AccountBalancesView.as_view()),
     path("periods/", views.PeriodListView.as_view()),
     path("periods/<uuid:period_id>/close/", views.ClosePeriodView.as_view()),
     path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
