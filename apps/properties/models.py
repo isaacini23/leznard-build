@@ -155,6 +155,16 @@ class Unit(TenantModel):
                 _same_company(self, "building", self.building)
                 if self.building.property_id != self.property_id:
                     raise ValidationError({"building": "This building belongs to a different property."})
+        if self.pk and self.occupancy_status != self.Occupancy.OCCUPIED:
+            if Tenancy.objects.filter(
+                unit_id=self.pk, status=Tenancy.Status.ACTIVE
+            ).exists():
+                raise ValidationError({
+                    "occupancy_status": (
+                        "A unit with an active tenancy must remain occupied. "
+                        "End the tenancy before changing its occupancy status."
+                    )
+                })
 
     def save(self, *args, **kwargs):
         self.full_clean()
