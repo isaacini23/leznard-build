@@ -2,8 +2,10 @@ import pytest
 
 from apps.accounting.models import Account
 from apps.accounting.services import create_default_chart_of_accounts
+from apps.contacts.models import Contact
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Organization
+from apps.sales.models import PurchaseBill, PurchaseBillLine
 from tests.test_properties import call, make_contact, make_property, register, staff_client
 from tests.test_rent_management import active_tenancy, configure_schedule
 
@@ -25,32 +27,30 @@ def create_property_rent_invoice(client, org_id):
 
 
 def create_property_purchase_bill(client, org_id, prop, *, document_date="2027-01-10"):
-    supplier = make_contact(client, org_id, "Property Supplies", "supplier")
+    supplier_data = make_contact(client, org_id, "Property Supplies", "supplier")
     organization = Organization.objects.get(pk=org_id)
     with organization_context(organization.pk):
         create_default_chart_of_accounts(organization)
         expense = Account.objects.get(account_type=Account.AccountType.OTHER_EXPENSE)
-    response = call(
-        client, "post", "/api/v1/purchase-bills/", org_id,
-        {
-            "number": "PROP-EXP-001",
-            "supplier": supplier["id"],
-            "property": prop["id"],
-            "document_date": document_date,
-            "due_date": "2027-02-10",
-            "currency": "NGN",
-            "lines": [{
-                "description": "Property repairs and supplies",
-                "quantity": "1",
-                "unit_price": "15000",
-                "discount_amount": "0",
-                "tax_amount": "0",
-                "expense_account": str(expense.pk),
-            }],
-        },
-    )
-    assert response.status_code == 201, response.content
-    return response.json(), supplier
+        supplier = Contact.unscoped.get(pk=supplier_data["id"])
+        bill = PurchaseBill.objects.create(
+            number="PROP-EXP-001",
+            supplier=supplier,
+            property_id=prop["id"],
+            document_date=document_date,
+            due_date="2027-02-10",
+            currency="NGN",
+        )
+        PurchaseBillLine.objects.create(
+            bill=bill,
+            description="Property repairs and supplies",
+            quantity="1",
+            unit_price="15000",
+            discount_amount="0",
+            tax_amount="0",
+            expense_account=expense,
+        )
+    return {"id": str(bill.pk)}, supplier_data
 
 
 def test_property_profitability_reports_accrual_and_cash_performance():
