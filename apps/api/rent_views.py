@@ -41,6 +41,7 @@ class RentScheduleSerializer(serializers.ModelSerializer):
 
 
 class RentChargeSerializer(serializers.ModelSerializer):
+    tenancy = serializers.PrimaryKeyRelatedField(read_only=True)
     invoice_id = serializers.UUIDField(read_only=True)
     invoice_number = serializers.CharField(source="invoice.number", read_only=True)
     invoice_status = serializers.CharField(source="invoice.status", read_only=True)
