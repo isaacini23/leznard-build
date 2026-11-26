@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import property_views, views
+from . import property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -51,6 +51,9 @@ urlpatterns = [
     path("tenancies/<uuid:pk>/", property_views.TenancyDetailView.as_view()),
     path("tenancies/<uuid:pk>/activate/", property_views.TenancyActivateView.as_view()),
     path("tenancies/<uuid:pk>/end/", property_views.TenancyEndView.as_view()),
+    path("tenancies/<uuid:tenancy_id>/rent-schedule/", rent_views.TenancyRentScheduleView.as_view()),
+    path("tenancies/<uuid:tenancy_id>/rent-charges/", rent_views.TenancyRentChargesView.as_view()),
+    path("rent-schedules/<uuid:schedule_id>/generate/", rent_views.RentScheduleGenerateView.as_view()),
     path("", include("apps.contacts.urls")),
     path("", include("apps.sales.urls")),
     path("", include("apps.payments.urls")),
