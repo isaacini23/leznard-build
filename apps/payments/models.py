@@ -50,7 +50,12 @@ class Payment(TenantModel):
         ordering = ["-payment_date", "-created_at"]
         constraints = [
             models.CheckConstraint(condition=Q(amount__gt=0), name="payment_amount_positive"),
-            models.Index(fields=["organization", "payment_type", "payment_date"]),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organization", "payment_type", "payment_date"],
+                name="payments_org_type_date_idx",
+            ),
         ]
 
     def __str__(self):
@@ -58,6 +63,8 @@ class Payment(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({"amount": "Payment amount must be greater than zero."})
         if self.currency:
             self.currency = self.currency.upper()
             if len(self.currency) != 3:
@@ -106,10 +113,7 @@ class Payment(TenantModel):
 
     @property
     def allocated_amount(self):
-        return sum(
-            (row.amount for row in self.allocations.filter(payment__status=self.Status.DRAFT)),
-            Decimal("0"),
-        )
+        return sum((row.amount for row in self.allocations.all()), Decimal("0"))
 
     @property
     def unallocated_amount(self):
@@ -155,6 +159,8 @@ class PaymentAllocation(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({"amount": "Allocation amount must be greater than zero."})
         if not self.payment_id:
             return
         if self.payment.status != Payment.Status.DRAFT:
