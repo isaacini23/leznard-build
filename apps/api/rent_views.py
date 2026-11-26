@@ -152,9 +152,7 @@ class RentScheduleGenerateView(_RentAPIView):
     def post(self, request, schedule_id):
         schedule = get_object_or_404(RentSchedule.objects.all(), pk=schedule_id)
         try:
-            charge = services.generate_next_rent_invoice(
-                schedule.pk, created_by=request.user
-            )
+            charge = services.generate_next_rent_invoice(schedule.pk)
         except DjangoValidationError as exc:
             return self.model_error(exc)
         except IntegrityError:
