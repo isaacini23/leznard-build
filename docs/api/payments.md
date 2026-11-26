@@ -27,7 +27,7 @@ All endpoints require an authenticated session and an active organization select
 
 Use `payment_type: "supplier_payment"` and allocate against `purchase_bill` instead of `sales_invoice`.
 
-A payment may be allocated across multiple posted documents. Allocation totals cannot exceed the payment amount, and posting refuses allocations that exceed a document's remaining balance. The unallocated amount remains an on-account customer/supplier balance for later allocation; this phase does not yet provide a separate credit-note/refund workflow.
+A payment may be allocated across multiple posted documents. Allocation totals cannot exceed the payment amount, and posting refuses allocations that exceed a document's remaining balance. Any unallocated amount is posted to the customer's/supplier's control account as an unapplied balance. Reallocating an already-posted unapplied balance to a later invoice/bill, credit notes and refunds are deferred; posted payments and allocations remain immutable.
 
 ## Endpoints
 
