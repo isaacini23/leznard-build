@@ -15,6 +15,9 @@ PERMISSIONS = [
     "purchases.bill.view",
     "purchases.bill.manage",
     "purchases.bill.post",
+    "payments.payment.view",
+    "payments.payment.manage",
+    "payments.payment.post",
     "properties.property.view",
     "properties.property.manage",
     "properties.lease.manage",
@@ -44,6 +47,8 @@ DEFAULT_ROLES = [
             "sales.invoice.manage",
             "purchases.bill.view",
             "purchases.bill.manage",
+            "payments.payment.view",
+            "payments.payment.manage",
         ],
     ),
     (
@@ -62,6 +67,9 @@ DEFAULT_ROLES = [
             "purchases.bill.view",
             "purchases.bill.manage",
             "purchases.bill.post",
+            "payments.payment.view",
+            "payments.payment.manage",
+            "payments.payment.post",
         ],
     ),
     (
@@ -92,6 +100,7 @@ DEFAULT_ROLES = [
             "contacts.contact.view",
             "sales.invoice.view",
             "purchases.bill.view",
+            "payments.payment.view",
         ],
     ),
 ]
