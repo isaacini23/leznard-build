@@ -88,14 +88,18 @@ class PaymentListCreateView(APIView):
             return Response({"detail": "You do not have permission to record this payment."}, status=403)
         if can_record_rent and not can_manage_all:
             org_id = get_current_org_id()
-            if not ContactRole.unscoped.filter(
-                organization_id=org_id,
-                contact_id=request.data.get("contact"),
-                role=ContactRole.Role.TENANT,
-            ).exists():
+            try:
+                is_tenant = ContactRole.unscoped.filter(
+                    organization_id=org_id,
+                    contact_id=request.data.get("contact"),
+                    role=ContactRole.Role.TENANT,
+                ).exists()
+            except (ValueError, DjangoValidationError):
+                is_tenant = False
+            if not is_tenant:
                 return Response({"detail": "Property payment recording is limited to tenant contacts."}, status=403)
             allocations = request.data.get("allocations") or []
-            if not allocations:
+            if not isinstance(allocations, list) or not allocations:
                 return Response({"detail": "Allocate a rent receipt to at least one posted rent invoice."}, status=400)
             for allocation in allocations:
                 if not isinstance(allocation, dict):
@@ -103,9 +107,13 @@ class PaymentListCreateView(APIView):
                 invoice_id = allocation.get("sales_invoice")
                 if not invoice_id or allocation.get("purchase_bill"):
                     return Response({"detail": "Property officers can allocate receipts only to rent invoices."}, status=400)
-                if not SalesInvoice.objects.filter(
-                    pk=invoice_id, tenancy__isnull=False, status=SalesInvoice.Status.POSTED
-                ).exists():
+                try:
+                    is_posted_rent_invoice = SalesInvoice.objects.filter(
+                        pk=invoice_id, tenancy__isnull=False, status=SalesInvoice.Status.POSTED
+                    ).exists()
+                except (ValueError, DjangoValidationError):
+                    is_posted_rent_invoice = False
+                if not is_posted_rent_invoice:
                     return Response({"detail": "Receipts can only be allocated to posted rent invoices."}, status=400)
         serializer = PaymentSerializer(
             data=request.data, context={"organization_id": get_current_org_id()}
