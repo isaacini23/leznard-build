@@ -76,15 +76,18 @@ class Payment(TenantModel):
         if self.contact_id and self.organization_id:
             if self.contact.organization_id != self.organization_id:
                 raise ValidationError({"contact": "Contact must belong to this organization."})
-            required_role = (
-                ContactRole.Role.CUSTOMER
+            required_roles = (
+                (ContactRole.Role.CUSTOMER, ContactRole.Role.TENANT)
                 if self.payment_type == self.Type.CUSTOMER_RECEIPT
-                else ContactRole.Role.SUPPLIER
+                else (ContactRole.Role.SUPPLIER,)
             )
             if not ContactRole.unscoped.filter(
-                organization_id=self.organization_id, contact_id=self.contact_id, role=required_role
+                organization_id=self.organization_id,
+                contact_id=self.contact_id,
+                role__in=required_roles,
             ).exists():
-                raise ValidationError({"contact": f"Contact must have the {required_role} role."})
+                role_names = "Customer or Tenant" if self.payment_type == self.Type.CUSTOMER_RECEIPT else "Supplier"
+                raise ValidationError({"contact": f"Contact must have the {role_names} role."})
             if not self.contact.is_active:
                 raise ValidationError({"contact": "Inactive contacts cannot receive payments."})
         if self.account_id and self.organization_id:

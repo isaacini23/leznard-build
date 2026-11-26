@@ -9,6 +9,7 @@ from django.db.models import Q, Sum
 
 from apps.contacts.models import Contact, ContactRole
 from apps.core.models import TenantModel
+from apps.core.tenancy import get_current_org_id
 
 OWNER_ROLES = (ContactRole.Role.PROPERTY_OWNER, ContactRole.Role.LANDLORD)
 HUNDRED = Decimal("100")
@@ -401,3 +402,98 @@ class Tenancy(TenantModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+class RentSchedule(TenantModel):
+    """Recurring rent billing instructions for one active tenancy."""
+
+    tenancy = models.OneToOneField(
+        Tenancy, on_delete=models.PROTECT, related_name="rent_schedule"
+    )
+    revenue_account = models.ForeignKey(
+        "accounting.Account", on_delete=models.PROTECT, related_name="rent_schedules"
+    )
+    next_invoice_date = models.DateField()
+    billing_day = models.PositiveSmallIntegerField(null=True, blank=True)
+    due_days = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["next_invoice_date"]
+
+    def clean(self):
+        super().clean()
+        if self.due_days is not None and self.due_days > 90:
+            raise ValidationError({"due_days": "Payment terms cannot exceed 90 days."})
+        if self.billing_day is not None and not 1 <= self.billing_day <= 31:
+            raise ValidationError({"billing_day": "Billing day must be between 1 and 31."})
+        if self.tenancy_id and self.organization_id:
+            _same_company(self, "tenancy", self.tenancy)
+            if self.is_active and self.tenancy.status != Tenancy.Status.ACTIVE:
+                raise ValidationError({"is_active": "Only an active tenancy can have an active rent schedule."})
+            if self.next_invoice_date and self.next_invoice_date < self.tenancy.start_date:
+                raise ValidationError({"next_invoice_date": "The next invoice date cannot be before the tenancy starts."})
+        if self.revenue_account_id and self.organization_id:
+            _same_company(self, "revenue_account", self.revenue_account)
+            if self.revenue_account.category != "income" or not self.revenue_account.is_active:
+                raise ValidationError({"revenue_account": "Choose an active income account."})
+        if self.tenancy_id and self.next_invoice_date:
+            latest = RentCharge.objects.filter(tenancy_id=self.tenancy_id).order_by("-period_end").first()
+            if latest and self.next_invoice_date <= latest.period_end:
+                raise ValidationError({"next_invoice_date": "The next invoice date must be after the last billed period."})
+
+    def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
+        if self.billing_day is None and self.next_invoice_date:
+            self.billing_day = self.next_invoice_date.day
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Rent schedule: {self.tenancy}"
+
+
+class RentCharge(TenantModel):
+    """A rent period represented by a normal sales invoice and its ledger/payment lifecycle."""
+
+    tenancy = models.ForeignKey(Tenancy, on_delete=models.PROTECT, related_name="rent_charges")
+    invoice = models.OneToOneField(
+        "sales.SalesInvoice", on_delete=models.PROTECT, related_name="rent_charge"
+    )
+    period_start = models.DateField()
+    period_end = models.DateField()
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-period_start", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenancy", "period_start"], name="unique_rent_charge_period"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(period_end__gte=models.F("period_start")),
+                name="rent_period_end_not_before_start",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.period_start and self.period_end and self.period_end < self.period_start:
+            raise ValidationError({"period_end": "The rent period cannot end before it starts."})
+        if self.tenancy_id and self.invoice_id and self.organization_id:
+            _same_company(self, "tenancy", self.tenancy)
+            _same_company(self, "invoice", self.invoice)
+            if self.invoice.tenancy_id != self.tenancy_id:
+                raise ValidationError({"invoice": "The invoice must be linked to this tenancy."})
+            if self.invoice.customer_id != self.tenancy.tenant_id:
+                raise ValidationError({"invoice": "The invoice customer must be the tenancy's tenant."})
+
+    def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Rent {self.period_start} to {self.period_end}: {self.tenancy}"
+

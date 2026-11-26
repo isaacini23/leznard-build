@@ -64,6 +64,14 @@ class PaymentSerializer(serializers.ModelSerializer):
                 category=Account.Category.ASSET,
                 account_type__in=[Account.AccountType.CASH, Account.AccountType.BANK],
             )
+            # Explicitly scope nested allocation fields from the parent request context.
+            allocations = self.fields["allocations"].child
+            allocations.fields["sales_invoice"].queryset = SalesInvoice.unscoped.filter(
+                organization_id=org_id, status=SalesInvoice.Status.POSTED
+            )
+            allocations.fields["purchase_bill"].queryset = PurchaseBill.unscoped.filter(
+                organization_id=org_id, status=PurchaseBill.Status.POSTED
+            )
 
     def create(self, validated_data):
         allocations = validated_data.pop("allocations", [])

@@ -83,6 +83,10 @@ class SalesInvoice(FinancialDocument):
     customer = models.ForeignKey(
         "contacts.Contact", on_delete=models.PROTECT, related_name="sales_invoices"
     )
+    tenancy = models.ForeignKey(
+        "properties.Tenancy", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="rent_invoices",
+    )
 
     class Meta:
         ordering = ["-document_date", "-created_at"]
@@ -96,6 +100,11 @@ class SalesInvoice(FinancialDocument):
             raise ValidationError({"customer": "Customer must belong to this organization."})
         if self.customer_id and not self.customer.is_active:
             raise ValidationError({"customer": "Inactive contacts cannot be used on new invoices."})
+        if self.tenancy_id and self.organization_id:
+            if self.tenancy.organization_id != self.organization_id:
+                raise ValidationError({"tenancy": "Tenancy must belong to this organization."})
+            if self.tenancy.tenant_id != self.customer_id:
+                raise ValidationError({"customer": "The invoice customer must be the tenancy's tenant."})
 
     def __str__(self):
         return self.number
