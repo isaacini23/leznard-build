@@ -3,10 +3,8 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
-from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -15,6 +13,7 @@ from apps.access.drf import require
 from apps.accounting.models import Account, JournalEntry, JournalLine
 from apps.accounting.services import create_journal_entry, post_journal_entry, reverse_journal_entry
 from apps.core.tenancy import get_current_org_id
+from apps.organizations.models import Organization
 
 
 def _error(exc):
@@ -76,10 +75,9 @@ class AccountListCreateView(APIView):
         return Response([_account_payload(a) for a in accounts.order_by("code")])
 
     def post(self, request):
-        if not request.user.has_perm("accounting.account.manage"):
-            from apps.access.services import has_permission
-            if not has_permission(request.user, "accounting.account.manage", get_current_org_id()):
-                return Response({"error": {"message": "You do not have permission to manage accounts."}}, status=403)
+        from apps.access.services import has_permission
+        if not has_permission(request.user, "accounting.account.manage", get_current_org_id()):
+            return Response({"error": {"message": "You do not have permission to manage accounts."}}, status=403)
         data = request.data
         try:
             parent = Account.objects.get(pk=data["parent_id"]) if data.get("parent_id") else None
@@ -153,7 +151,7 @@ class JournalListCreateView(APIView):
             if not isinstance(lines, list) or len(lines) < 2:
                 raise ValidationError({"lines": "Provide at least two journal lines."})
             entry = create_journal_entry(
-                request.user.memberships.get(organization_id=get_current_org_id()).organization,
+                Organization.objects.get(pk=get_current_org_id()),
                 entry_date=entry_date, description=data.get("description", "").strip(),
                 reference=data.get("reference", ""), currency=data.get("currency"),
                 exchange_rate=data.get("exchange_rate"), lines=lines,
