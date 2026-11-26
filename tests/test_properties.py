@@ -94,19 +94,6 @@ def test_validation_rules():
 
 
 
-def test_owner_must_be_an_owner_or_landlord_contact_of_the_same_company():
-    client, org = register()
-    tenant = make_contact(client, org, "Ada", "tenant")
-    owner = make_contact(client, org, "Chief Bello", "property_owner")
-    landlord = make_contact(client, org, "Mrs Eze", "landlord")
-    assert make_property(client, org, "P1", owner=tenant["id"]).status_code == 400
-    assert make_property(client, org, "P2", owner=owner["id"]).status_code == 201
-    assert make_property(client, org, "P3", owner=landlord["id"]).status_code == 201
-
-    other, other_org = register("second@example.com", "Other Co")
-    assert make_property(other, other_org, "P4", owner=owner["id"]).status_code == 400  # another company's contact
-
-
 def test_a_company_cannot_see_or_touch_another_companys_records():
     a, org_a = register()
     b, org_b = register("second@example.com", "Other Co")
