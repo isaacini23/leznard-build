@@ -83,6 +83,10 @@ def test_tenancy_lifecycle_updates_unit_occupancy():
     act = call(c, "post", f"/api/v1/tenancies/{t.json()['id']}/activate/", org)
     assert act.status_code == 200 and act.json()["status"] == "active"
     assert call(c, "get", f"/api/v1/units/{unit['id']}/", org).json()["occupancy_status"] == "occupied"
+    # An active tenancy must not be made vacant or put under maintenance manually.
+    for occupancy in ("vacant", "maintenance"):
+        changed = call(c, "patch", f"/api/v1/units/{unit['id']}/", org, {"occupancy_status": occupancy})
+        assert changed.status_code == 400, changed.content
     # second active tenancy on the same unit is refused
     t2 = call(c, "post", "/api/v1/tenancies/", org, {**body, "tenant": bola["id"]}).json()
     assert call(c, "post", f"/api/v1/tenancies/{t2['id']}/activate/", org).status_code == 400
@@ -185,3 +189,28 @@ def test_nothing_can_be_deleted():
     prop, unit = prop_and_unit(c, org)
     for url in (f"/api/v1/properties/{prop['id']}/", f"/api/v1/units/{unit['id']}/"):
         assert call(c, "delete", url, org).status_code == 405
+
+
+def test_tenancy_activation_requires_active_property_and_vacant_unit():
+    c, org = register()
+    ada = make_contact(c, org, "Ada", "tenant")
+
+    for status in ("inactive", "sold"):
+        prop = make_property(c, org, f"{status.title()} Estate", status=status).json()
+        unit = call(c, "post", f"/api/v1/properties/{prop['id']}/units/", org,
+                    {"label": "A1", "unit_type": "flat"}).json()
+        tenancy = call(c, "post", "/api/v1/tenancies/", org,
+                       {"unit": unit["id"], "tenant": ada["id"], "start_date": "2026-01-01",
+                        "rent_amount": "100"}).json()
+        response = call(c, "post", f"/api/v1/tenancies/{tenancy['id']}/activate/", org)
+        assert response.status_code == 400, response.content
+
+    active_property, unit = prop_and_unit(c, org, "Already Occupied")
+    changed = call(c, "patch", f"/api/v1/units/{unit['id']}/", org,
+                   {"occupancy_status": "occupied"})
+    assert changed.status_code == 200, changed.content
+    tenancy = call(c, "post", "/api/v1/tenancies/", org,
+                   {"unit": unit["id"], "tenant": ada["id"], "start_date": "2026-01-01",
+                    "rent_amount": "100"}).json()
+    response = call(c, "post", f"/api/v1/tenancies/{tenancy['id']}/activate/", org)
+    assert response.status_code == 400, response.content
