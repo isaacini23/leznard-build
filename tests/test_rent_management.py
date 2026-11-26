@@ -7,7 +7,7 @@ from apps.accounting.models import Account
 from apps.accounting.services import create_default_chart_of_accounts
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Organization
-from tests.test_properties import call, make_contact, make_property, register
+from tests.test_properties import call, make_contact, make_property, register, staff_client
 
 
 pytestmark = pytest.mark.django_db
@@ -191,3 +191,53 @@ def test_rent_schedule_and_charges_are_tenant_isolated():
     assert call(
         other, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", other_org
     ).status_code == 404
+
+
+
+def test_property_officer_can_record_only_tenant_rent_receipts():
+    owner, org_id = register()
+    _, _, tenant, tenancy = active_tenancy(owner, org_id)
+    schedule = configure_schedule(owner, org_id, tenancy)
+    generated = call(
+        owner, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org_id
+    )
+    invoice_id = generated.json()["invoice_id"]
+    posted = call(owner, "post", f"/api/v1/sales-invoices/{invoice_id}/post/", org_id)
+    assert posted.status_code == 200, posted.content
+
+    organization = Organization.objects.get(pk=org_id)
+    with organization_context(organization.pk):
+        bank = Account.objects.get(account_type=Account.AccountType.BANK)
+    officer = staff_client(org_id, "Property officer", "property-officer@example.com")
+    receipt = call(
+        officer, "post", "/api/v1/payments/", org_id,
+        {
+            "payment_type": "customer_receipt",
+            "payment_date": "2027-02-01",
+            "contact": tenant["id"],
+            "account": str(bank.pk),
+            "amount": "30000",
+            "currency": "NGN",
+            "allocations": [{"sales_invoice": invoice_id, "amount": "30000"}],
+        },
+    )
+    assert receipt.status_code == 201, receipt.content
+    assert call(officer, "get", "/api/v1/payments/", org_id).status_code == 200
+    assert call(
+        officer, "get", f"/api/v1/payments/{receipt.json()['id']}/", org_id
+    ).status_code == 200
+    assert call(
+        officer, "post", f"/api/v1/payments/{receipt.json()['id']}/post/", org_id
+    ).status_code == 403
+
+    non_rent = call(
+        officer, "post", "/api/v1/payments/", org_id,
+        {
+            "payment_type": "customer_receipt",
+            "payment_date": "2027-02-01",
+            "contact": tenant["id"],
+            "account": str(bank.pk),
+            "amount": "1000",
+        },
+    )
+    assert non_rent.status_code == 400
