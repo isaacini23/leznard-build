@@ -172,6 +172,10 @@ class PurchaseBill(FinancialDocument):
         "contacts.Contact", on_delete=models.PROTECT, related_name="purchase_bills"
     )
     supplier_reference = models.CharField(max_length=100, blank=True)
+    property = models.ForeignKey(
+        "properties.Property", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="purchase_bills",
+    )
 
     class Meta:
         ordering = ["-document_date", "-created_at"]
@@ -185,6 +189,9 @@ class PurchaseBill(FinancialDocument):
             raise ValidationError({"supplier": "Supplier must belong to this organization."})
         if self.supplier_id and not self.supplier.is_active:
             raise ValidationError({"supplier": "Inactive contacts cannot be used on new bills."})
+        if self.property_id and self.organization_id:
+            if self.property.organization_id != self.organization_id:
+                raise ValidationError({"property": "Property must belong to this organization."})
 
     def __str__(self):
         return self.number
