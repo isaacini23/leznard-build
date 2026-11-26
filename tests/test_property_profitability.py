@@ -1,9 +1,4 @@
-from datetime import date
-from decimal import Decimal
-
 import pytest
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError
 
 from apps.accounting.models import Account
 from apps.accounting.services import create_default_chart_of_accounts
@@ -17,7 +12,7 @@ pytestmark = pytest.mark.django_db
 
 
 def create_property_rent_invoice(client, org_id):
-    prop, _, tenant, tenancy = active_tenancy(client, org_id)
+    prop, _, tenant, tenancy = active_tenancy(client, org_id, start="2027-01-01")
     schedule = configure_schedule(client, org_id, tenancy, next_date="2027-01-01")
     generated = call(
         client, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org_id
@@ -123,7 +118,7 @@ def test_property_profitability_reports_accrual_and_cash_performance():
 
 def test_draft_documents_are_excluded_and_date_range_is_respected():
     client, org_id = register()
-    prop, _, _ = create_property_rent_invoice(client, org_id, )
+    prop, _, _ = create_property_rent_invoice(client, org_id)
     create_property_purchase_bill(client, org_id, prop, document_date="2026-12-15")
     report = call(
         client, "get",

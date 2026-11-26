@@ -1,7 +1,7 @@
 """Read-only property profitability reporting API."""
 from datetime import date
 
-from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -22,13 +22,13 @@ class PropertyProfitabilityView(APIView):
         try:
             start = date.fromisoformat(request.query_params.get("start", ""))
         except (TypeError, ValueError):
-            raise DjangoValidationError({"start": "Use a date like 2026-01-01."})
+            raise ValidationError({"start": "Use a date like 2026-01-01."})
         try:
             end = date.fromisoformat(request.query_params.get("end", ""))
         except (TypeError, ValueError):
-            raise DjangoValidationError({"end": "Use a date like 2026-01-31."})
+            raise ValidationError({"end": "Use a date like 2026-01-31."})
         if end < start:
-            raise DjangoValidationError({"end": "The end date cannot be before the start date."})
+            raise ValidationError({"end": "The end date cannot be before the start date."})
 
         report = property_profitability(prop, start_date=start, end_date=end)
         return Response({

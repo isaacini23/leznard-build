@@ -109,6 +109,7 @@ DEFAULT_ROLES = [
         [
             "properties.lease.view",
             "properties.document.view",
+            "properties.profitability.view",
             "accounting.journal.view",
             "reports.report.view",
             "audit.log.view",
