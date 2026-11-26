@@ -98,6 +98,8 @@ class PaymentListCreateView(APIView):
             if not allocations:
                 return Response({"detail": "Allocate a rent receipt to at least one posted rent invoice."}, status=400)
             for allocation in allocations:
+                if not isinstance(allocation, dict):
+                    return Response({"detail": "Each rent allocation must be an object."}, status=400)
                 invoice_id = allocation.get("sales_invoice")
                 if not invoice_id or allocation.get("purchase_bill"):
                     return Response({"detail": "Property officers can allocate receipts only to rent invoices."}, status=400)
