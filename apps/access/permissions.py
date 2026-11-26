@@ -20,7 +20,10 @@ PERMISSIONS = [
     "payments.payment.post",
     "properties.property.view",
     "properties.property.manage",
+    "properties.lease.view",
     "properties.lease.manage",
+    "properties.document.view",
+    "properties.document.manage",
     "properties.payment.record",
     "workflows.approval.decide",
     "reports.report.view",
@@ -33,6 +36,9 @@ DEFAULT_ROLES = [
         "Manager",
         "Approves requests, views reports, manages properties and contacts",
         [
+            "properties.lease.view",
+            "properties.document.view",
+            "properties.document.manage",
             "properties.property.view",
             "properties.property.manage",
             "properties.lease.manage",
@@ -55,6 +61,7 @@ DEFAULT_ROLES = [
         "Accountant",
         "Posts entries, closes periods, runs statements and views contacts",
         [
+            "properties.lease.view",
             "accounting.journal.view",
             "accounting.journal.post",
             "accounting.period.close",
@@ -76,6 +83,9 @@ DEFAULT_ROLES = [
         "Property officer",
         "Day-to-day property work and contact management, no ledger posting",
         [
+            "properties.lease.view",
+            "properties.document.view",
+            "properties.document.manage",
             "properties.property.view",
             "properties.property.manage",
             "properties.lease.manage",
@@ -93,6 +103,8 @@ DEFAULT_ROLES = [
         "Auditor",
         "Read-only access to records, ledger, contacts and audit log",
         [
+            "properties.lease.view",
+            "properties.document.view",
             "accounting.journal.view",
             "reports.report.view",
             "audit.log.view",
