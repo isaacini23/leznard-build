@@ -72,8 +72,8 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SalesInvoice
-        fields = ("id", "number", "customer", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
-        read_only_fields = ("id", "status", "journal_entry", "posted_at", "created_at", "updated_at", "amount_paid", "amount_due", "payment_status")
+        fields = ("id", "number", "customer", "tenancy", "document_date", "due_date", "currency", "exchange_rate", "notes", "status", "lines", "subtotal", "tax_total", "total", "amount_paid", "amount_due", "payment_status", "journal_entry", "posted_at", "created_at", "updated_at")
+        read_only_fields = ("id", "tenancy", "status", "journal_entry", "posted_at", "created_at", "updated_at", "amount_paid", "amount_due", "payment_status")
 
     def get_amount_paid(self, obj):
         return _document_paid(obj, "sales_invoice")
