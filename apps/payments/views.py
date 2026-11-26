@@ -8,6 +8,8 @@ from rest_framework.views import APIView
 
 from apps.access.services import has_permission
 from apps.core.tenancy import get_current_org_id
+from apps.contacts.models import ContactRole
+from apps.sales.models import SalesInvoice
 
 from .models import Payment, PaymentAllocation
 from .serializers import PaymentSerializer
@@ -60,7 +62,10 @@ class PaymentListCreateView(APIView):
         if not has_permission(
             request.user, "payments.payment.view", organization_id=get_current_org_id()
         ):
-            queryset = queryset.filter(payment_type=Payment.Type.CUSTOMER_RECEIPT)
+            queryset = queryset.filter(
+                payment_type=Payment.Type.CUSTOMER_RECEIPT,
+                contact__roles__role=ContactRole.Role.TENANT,
+            ).distinct()
         if payment_type:
             queryset = queryset.filter(payment_type=payment_type)
         if state:
@@ -81,6 +86,25 @@ class PaymentListCreateView(APIView):
         )
         if not (can_manage_all or can_record_rent):
             return Response({"detail": "You do not have permission to record this payment."}, status=403)
+        if can_record_rent and not can_manage_all:
+            org_id = get_current_org_id()
+            if not ContactRole.unscoped.filter(
+                organization_id=org_id,
+                contact_id=request.data.get("contact"),
+                role=ContactRole.Role.TENANT,
+            ).exists():
+                return Response({"detail": "Property payment recording is limited to tenant contacts."}, status=403)
+            allocations = request.data.get("allocations") or []
+            if not allocations:
+                return Response({"detail": "Allocate a rent receipt to at least one posted rent invoice."}, status=400)
+            for allocation in allocations:
+                invoice_id = allocation.get("sales_invoice")
+                if not invoice_id or allocation.get("purchase_bill"):
+                    return Response({"detail": "Property officers can allocate receipts only to rent invoices."}, status=400)
+                if not SalesInvoice.objects.filter(
+                    pk=invoice_id, tenancy__isnull=False, status=SalesInvoice.Status.POSTED
+                ).exists():
+                    return Response({"detail": "Receipts can only be allocated to posted rent invoices."}, status=400)
         serializer = PaymentSerializer(
             data=request.data, context={"organization_id": get_current_org_id()}
         )
@@ -107,11 +131,16 @@ class PaymentDetailView(APIView):
             ),
             pk=payment_id,
         )
-        if (
-            not has_permission(request.user, "payments.payment.view", organization_id=get_current_org_id())
-            and payment.payment_type != Payment.Type.CUSTOMER_RECEIPT
-        ):
-            return Response(status=404)
+        if not has_permission(request.user, "payments.payment.view", organization_id=get_current_org_id()):
+            if (
+                payment.payment_type != Payment.Type.CUSTOMER_RECEIPT
+                or not ContactRole.unscoped.filter(
+                    organization_id=get_current_org_id(),
+                    contact_id=payment.contact_id,
+                    role=ContactRole.Role.TENANT,
+                ).exists()
+            ):
+                return Response(status=404)
         return Response(PaymentSerializer(
             payment, context={"organization_id": get_current_org_id()}
         ).data)
