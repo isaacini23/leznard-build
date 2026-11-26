@@ -60,25 +60,30 @@ class RentChargeSerializer(serializers.ModelSerializer):
             "amount_paid", "amount_due", "status", "generated_at",
         )
 
-    def get_amount_paid(self, obj):
+    def _amount_paid(self, obj):
         return PaymentAllocation.unscoped.filter(
             organization_id=obj.organization_id,
             sales_invoice=obj.invoice,
             payment__status=Payment.Status.POSTED,
         ).aggregate(total=Sum("amount"))["total"] or Decimal("0.0000")
 
+    def get_amount_paid(self, obj):
+        return format(self._amount_paid(obj), ".4f")
+
     def get_amount_due(self, obj):
-        return max(obj.invoice.total - self.get_amount_paid(obj), Decimal("0.0000"))
+        amount_due = max(obj.invoice.total - self._amount_paid(obj), Decimal("0.0000"))
+        return format(amount_due, ".4f")
 
     def get_status(self, obj):
         if obj.invoice.status != obj.invoice.Status.POSTED:
             return "draft"
-        due = self.get_amount_due(obj)
+        paid = self._amount_paid(obj)
+        due = max(obj.invoice.total - paid, Decimal("0.0000"))
         if due <= 0:
             return "paid"
         if obj.invoice.due_date < timezone.localdate():
             return "overdue"
-        if self.get_amount_paid(obj) > 0:
+        if paid > 0:
             return "partially_paid"
         return "unpaid"
 
