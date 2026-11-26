@@ -189,6 +189,13 @@ class PaymentAllocation(TenantModel):
             raise ValidationError("Payments can only be allocated to posted invoices or bills.")
         if document.currency.upper() != self.payment.currency.upper():
             raise ValidationError({"amount": "Payment and document currencies must match."})
+        if document.exchange_rate != self.payment.exchange_rate:
+            raise ValidationError({
+                "amount": (
+                    "The payment exchange rate must match the invoice or bill exchange rate. "
+                    "Realized foreign-exchange gain/loss accounting is not yet supported."
+                )
+            })
         existing = type(self).unscoped.filter(payment_id=self.payment_id)
         if self.pk:
             existing = existing.exclude(pk=self.pk)
