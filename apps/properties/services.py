@@ -79,7 +79,7 @@ def _add_billing_months(value, months, billing_day):
 @transaction.atomic
 def generate_next_rent_invoice(schedule_id, *, created_by=None):
     """Create one draft sales invoice for the next rent period and advance its schedule."""
-    schedule = RentSchedule.unscoped.select_related(
+    schedule = RentSchedule.objects.select_related(
         "tenancy__tenant", "tenancy__unit__property", "revenue_account", "organization"
     ).get(pk=schedule_id)
     with organization_context(schedule.organization_id):
