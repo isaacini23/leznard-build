@@ -6,7 +6,6 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.access.drf import require
 from apps.access.services import has_permission
 from apps.core.tenancy import get_current_org_id
 
