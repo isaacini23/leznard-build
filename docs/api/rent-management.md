@@ -42,6 +42,6 @@ Rent statuses are `draft`, `unpaid`, `partially_paid`, `overdue`, and `paid`. An
 
 Record rent receipts through the existing customer receipt endpoint. The contact must have the Tenant or Customer role, the receipt must use the tenancy tenant as its contact, and the allocation points to the generated sales invoice. Existing payment posting controls and immutable allocations apply.
 
-Permissions: `properties.lease.view` to view schedules and rent charges; `properties.lease.manage` to configure schedules and generate draft invoices; `sales.invoice.post` to post rent invoices; existing payment permissions govern receipt recording and posting.
+Permissions: `properties.lease.view` to view schedules and rent charges; `properties.lease.manage` to configure schedules and generate draft invoices; `sales.invoice.post` to post rent invoices. Property officers with `properties.payment.record` may record only tenant receipts allocated to posted rent invoices; accountants or users with `payments.payment.post` post receipts. Users with `payments.payment.manage` retain the existing general payment workflow.
 
 Deposits/refunds, prorated final periods, automated recurring jobs/reminders, lease renewals, and property maintenance are not included in this phase.
