@@ -9,6 +9,7 @@ from django.db.models import Q, Sum
 
 from apps.contacts.models import Contact, ContactRole
 from apps.core.models import TenantModel
+from apps.core.tenancy import get_current_org_id
 
 OWNER_ROLES = (ContactRole.Role.PROPERTY_OWNER, ContactRole.Role.LANDLORD)
 HUNDRED = Decimal("100")
@@ -441,6 +442,8 @@ class RentSchedule(TenantModel):
                 raise ValidationError({"next_invoice_date": "The next invoice date must be after the last billed period."})
 
     def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         if self.billing_day is None and self.next_invoice_date:
             self.billing_day = self.next_invoice_date.day
         self.full_clean()
@@ -486,6 +489,8 @@ class RentCharge(TenantModel):
                 raise ValidationError({"invoice": "The invoice customer must be the tenancy's tenant."})
 
     def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
         self.full_clean()
         super().save(*args, **kwargs)
 
