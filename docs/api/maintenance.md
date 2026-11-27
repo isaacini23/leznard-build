@@ -9,3 +9,7 @@ Repair tickets for a property or one unit. Requests are never deleted: they are 
 
 Costs are recorded on the request only; posting repair costs to the ledger (through a purchase bill) is a later step.
 Built-in roles: Manager and Property officer can manage; Employee, Accountant and Auditor can view.
+
+## Billing a completed job
+
+`POST /api/v1/maintenance/{id}/bill/` `{bill_date?, post?}` turns the actual cost of a completed job into a purchase bill from the assigned contractor, charged to Repairs and maintenance and tagged to the property (so it appears in property profitability). The contractor needs the Supplier role so the bill can be paid; a job can be billed once. `post: true` also posts it to the ledger and needs `purchases.bill.post`; otherwise it stays a draft.

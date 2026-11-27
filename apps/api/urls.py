@@ -55,6 +55,7 @@ urlpatterns = [
     path("maintenance/<uuid:pk>/start/", maintenance_views.MaintenanceStartView.as_view()),
     path("maintenance/<uuid:pk>/complete/", maintenance_views.MaintenanceCompleteView.as_view()),
     path("maintenance/<uuid:pk>/cancel/", maintenance_views.MaintenanceCancelView.as_view()),
+    path("maintenance/<uuid:pk>/bill/", maintenance_views.MaintenanceBillView.as_view()),
     path("tenancies/", property_views.TenancyListCreateView.as_view()),
     path("tenancies/<uuid:pk>/", property_views.TenancyDetailView.as_view()),
     path("tenancies/<uuid:pk>/activate/", property_views.TenancyActivateView.as_view()),
