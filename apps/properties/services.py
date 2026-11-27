@@ -233,3 +233,37 @@ def record_rent_payment(
     PaymentAllocation.objects.create(payment=payment, sales_invoice=invoice, amount=amount)
     post_payment(payment, posted_by=posted_by)
     return RentCharge.objects.select_related("invoice").get(pk=charge_id)
+
+
+MAX_CATCH_UP_PERIODS = 24
+
+
+def generate_due_rent_invoices(today, *, post=False, posted_by=None):
+    """For the active company: create every rent invoice that has fallen due on or before
+    `today`, catching up missed periods, and optionally post them. Safe to run repeatedly:
+    a period is never invoiced twice. A schedule that can't continue (for example, the next
+    period runs past the tenancy end) is skipped with a reason and the rest carry on."""
+    generated, posted, skipped = 0, 0, []
+    schedules = RentSchedule.objects.filter(is_active=True, next_invoice_date__lte=today)
+    for schedule in schedules.select_related("tenancy__tenant", "tenancy__unit"):
+        for _ in range(MAX_CATCH_UP_PERIODS):
+            current = RentSchedule.objects.filter(pk=schedule.pk).first()
+            if current is None or not current.is_active or current.next_invoice_date > today:
+                break
+            try:
+                with transaction.atomic():
+                    charge = generate_next_rent_invoice(schedule.pk)
+                    generated += 1
+                    if post:
+                        post_rent_invoice(charge.pk, posted_by=posted_by)
+                        posted += 1
+            except ValidationError as exc:
+                detail = getattr(exc, "message_dict", None) or exc.messages
+                skipped.append({
+                    "tenancy": str(schedule.tenancy_id),
+                    "tenant": schedule.tenancy.tenant.display_name,
+                    "unit": schedule.tenancy.unit.label,
+                    "reason": detail if isinstance(detail, str) else str(detail),
+                })
+                break
+    return {"generated": generated, "posted": posted, "skipped": skipped}

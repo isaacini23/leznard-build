@@ -53,3 +53,8 @@ No accounting knowledge is needed to bill and collect rent.
 - `POST /api/v1/rent-schedules/{id}/generate/` with `{"post": true}` generates the invoice and posts it to the ledger.
 - `POST /api/v1/rent-charges/{charge_id}/post/` posts a draft rent invoice (needs `properties.lease.manage`).
 - `POST /api/v1/rent-charges/{charge_id}/pay/` (needs `properties.payment.record`) records a tenant's rent payment end to end: it posts the invoice if still a draft, creates the receipt, allocates it and posts it. All fields are optional: `amount` (default: everything still owed; part payments are allowed, overpaying is refused), `payment_date` (default today), `account` (default: the first active bank, else cash account), `method`, `reference`. Returns the updated rent charge.
+
+## Automatic monthly invoicing
+
+- Command (run daily, for example from cron): `python manage.py generate_rent_invoices [--post] [--date YYYY-MM-DD]` goes through every company, creates every rent invoice that has fallen due (catching up any missed periods, up to 24 per schedule) and, with `--post`, posts them. Running it again never duplicates a period. A schedule that cannot continue (for example the next period runs past the tenancy end) is reported and skipped; the rest carry on.
+- API: `POST /api/v1/rent-schedules/generate-due/` (`properties.lease.manage`, optional `{"post": true}`) does the same for the active company and returns `{generated, posted, skipped}`.
