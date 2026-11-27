@@ -62,3 +62,14 @@ No accounting knowledge is needed to bill and collect rent.
 ## Renewals and rent changes
 
 `POST /api/v1/tenancies/{id}/renew/` (`properties.lease.manage`) with `{start_date, end_date?, rent_amount?, rent_frequency?, deposit_amount?, notes?}` renews an active tenancy on new terms, for example a rent increase. The old tenancy ends the day before `start_date` (reason "Renewed"), a new active tenancy begins for the same tenant and unit (which stays occupied, linked through `renewed_from`), and rent billing carries on from the next invoice date at the new rent. Rent periods before the start date must already be invoiced, so they are billed at the old rent.
+
+## Tenant deposits
+
+Security deposits are held as a liability (account 2300 "Tenant Deposits Held", created on first use) and every movement is posted to the ledger. Movements are never edited or deleted.
+
+- `GET /api/v1/tenancies/{id}/deposit/` (`properties.lease.view`): agreed, received, deducted, refunded and held amounts, with the movements. After a renewal the deposit carries over to the new tenancy.
+- `POST .../deposit/receive/` `{amount?, date?, account?}`: money in (default: the agreed deposit not yet received; default bank or cash account).
+- `POST .../deposit/deduct/` `{amount, reason, date?, income_account?}`: keep part of the deposit for damages or arrears (ended tenancies only; recorded as other income).
+- `POST .../deposit/refund/` `{amount?, date?, account?}`: pay back (default: everything still held; ended tenancies only).
+
+Movements need `properties.payment.record`. You cannot deduct or refund more than is held.
