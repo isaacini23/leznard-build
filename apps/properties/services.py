@@ -3,6 +3,8 @@ from datetime import timedelta
 import uuid
 
 from django.core.exceptions import ValidationError
+from decimal import Decimal
+
 from django.db import transaction
 
 from apps.accounting.models import Account
@@ -140,3 +142,94 @@ def generate_next_rent_invoice(schedule_id):
         schedule.next_invoice_date = next_start
         schedule.save(update_fields=["next_invoice_date", "updated_at"])
         return charge
+
+
+# ---- owner-friendly rent actions ------------------------------------------------
+
+
+def rent_amount_paid(invoice):
+    from django.db.models import Sum
+
+    from apps.payments.models import Payment, PaymentAllocation
+
+    total = PaymentAllocation.unscoped.filter(
+        organization_id=invoice.organization_id,
+        sales_invoice=invoice,
+        payment__status=Payment.Status.POSTED,
+    ).aggregate(total=Sum("amount"))["total"]
+    return total or Decimal("0")
+
+
+def post_rent_invoice(charge_id, *, posted_by=None):
+    """Post a rent charge's draft invoice to the ledger (no-op error if already posted)."""
+    from apps.sales.services import post_sales_invoice
+
+    charge = RentCharge.objects.select_related("invoice").filter(pk=charge_id).first()
+    if charge is None:
+        raise ValidationError({"charge": "Rent charge not found."})
+    if charge.invoice.status == SalesInvoice.Status.POSTED:
+        raise ValidationError({"charge": "This rent invoice is already posted."})
+    post_sales_invoice(charge.invoice, posted_by=posted_by)
+    return RentCharge.objects.select_related("invoice").get(pk=charge_id)
+
+
+@transaction.atomic
+def record_rent_payment(
+    charge_id, *, account_id=None, amount=None, payment_date=None,
+    method="bank_transfer", reference="", posted_by=None,
+):
+    """Record a tenant's rent payment in one step: post the invoice if needed, create the
+    receipt, allocate it to the invoice and post it. Defaults to paying what is still due."""
+    from django.utils import timezone
+
+    from apps.payments.models import Payment, PaymentAllocation
+    from apps.payments.services import post_payment
+    from apps.sales.services import post_sales_invoice
+
+    charge = RentCharge.objects.select_related("invoice", "tenancy__tenant").filter(pk=charge_id).first()
+    if charge is None:
+        raise ValidationError({"charge": "Rent charge not found."})
+    invoice = charge.invoice
+    if invoice.status == SalesInvoice.Status.DRAFT:
+        invoice = post_sales_invoice(invoice, posted_by=posted_by)
+    elif invoice.status != SalesInvoice.Status.POSTED:
+        raise ValidationError({"charge": "This rent invoice cannot take payments."})
+
+    due = invoice.total - rent_amount_paid(invoice)
+    if due <= 0:
+        raise ValidationError({"amount": "This rent is already fully paid."})
+    try:
+        amount = due if amount in (None, "") else Decimal(str(amount))
+    except Exception:
+        raise ValidationError({"amount": "Enter a valid amount."})
+    if amount <= 0:
+        raise ValidationError({"amount": "Enter an amount above zero."})
+    if amount > due:
+        raise ValidationError({"amount": f"That is more than the {due:.2f} still owed."})
+
+    org_id = get_current_org_id()
+    if account_id:
+        account = Account.objects.filter(pk=account_id).first()
+        if account is None:
+            raise ValidationError({"account": "Account not found."})
+    else:
+        account = Account.objects.filter(
+            account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH), is_active=True
+        ).order_by("account_type", "code").first()
+        if account is None:
+            raise ValidationError({"account": "Add a bank or cash account first."})
+
+    payment = Payment.objects.create(
+        payment_type=Payment.Type.CUSTOMER_RECEIPT,
+        payment_date=payment_date or timezone.localdate(),
+        contact=charge.tenancy.tenant,
+        account=account,
+        amount=amount,
+        currency=invoice.currency,
+        exchange_rate=invoice.exchange_rate,
+        method=method,
+        reference=(reference or f"RENT-{invoice.number}")[:100],
+    )
+    PaymentAllocation.objects.create(payment=payment, sales_invoice=invoice, amount=amount)
+    post_payment(payment, posted_by=posted_by)
+    return RentCharge.objects.select_related("invoice").get(pk=charge_id)

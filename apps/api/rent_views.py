@@ -164,4 +164,53 @@ class RentScheduleGenerateView(_RentAPIView):
             return Response(
                 {"detail": "This rent period has already been invoiced."}, status=400
             )
+        if request.data.get("post") in (True, "true", "1", 1):
+            try:
+                charge = services.post_rent_invoice(charge.pk, posted_by=request.user)
+            except DjangoValidationError as exc:
+                return self.model_error(exc)
         return Response(RentChargeSerializer(charge).data, status=status.HTTP_201_CREATED)
+
+
+class RentChargePostView(_RentAPIView):
+    """Post a rent invoice to the ledger in one step."""
+
+    def post(self, request, charge_id):
+        get_object_or_404(RentCharge.objects.all(), pk=charge_id)
+        try:
+            charge = services.post_rent_invoice(charge_id, posted_by=request.user)
+        except DjangoValidationError as exc:
+            return self.model_error(exc)
+        return Response(RentChargeSerializer(charge).data)
+
+
+class RentChargePayView(APIView):
+    """Record a tenant's rent payment: posts the invoice if needed, then the receipt."""
+
+    def get_permissions(self):
+        return [IsAuthenticated(), require("properties.payment.record")()]
+
+    def post(self, request, charge_id):
+        get_object_or_404(RentCharge.objects.all(), pk=charge_id)
+        data = request.data
+        try:
+            payment_date = None
+            if data.get("payment_date"):
+                from datetime import date
+                try:
+                    payment_date = date.fromisoformat(str(data["payment_date"]))
+                except ValueError:
+                    raise DjangoValidationError({"payment_date": "Use a date like 2027-01-31."})
+            charge = services.record_rent_payment(
+                charge_id,
+                account_id=data.get("account") or None,
+                amount=data.get("amount"),
+                payment_date=payment_date,
+                method=data.get("method") or "bank_transfer",
+                reference=str(data.get("reference") or ""),
+                posted_by=request.user,
+            )
+        except (DjangoValidationError, ValueError) as exc:
+            detail = getattr(exc, "message_dict", None) or getattr(exc, "messages", [str(exc)])
+            return Response({"error": {"details": detail}}, status=400)
+        return Response(RentChargeSerializer(charge).data)
