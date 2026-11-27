@@ -370,6 +370,9 @@ class Tenancy(TenantModel):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     end_reason = models.CharField(max_length=300, blank=True)
     notes = models.TextField(blank=True)
+    renewed_from = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="renewal"
+    )
 
     class Meta:
         verbose_name_plural = "tenancies"

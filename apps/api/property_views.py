@@ -193,9 +193,9 @@ class TenancySerializer(serializers.ModelSerializer):
         model = Tenancy
         fields = [
             "id", "unit", "tenant", "tenant_name", "start_date", "end_date", "rent_amount",
-            "rent_frequency", "deposit_amount", "status", "end_reason", "notes",
+            "rent_frequency", "deposit_amount", "status", "end_reason", "notes", "renewed_from",
         ]
-        read_only_fields = ["id", "status", "end_reason"]
+        read_only_fields = ["id", "status", "end_reason", "renewed_from"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -586,3 +586,32 @@ class TenancyEndView(_TenancyAction):
         if error:
             return error
         return Response(TenancySerializer(tenancy).data)
+
+
+class TenancyRenewView(_TenancyAction):
+    """Renew on new terms: {start_date, end_date?, rent_amount?, rent_frequency?, deposit_amount?}."""
+
+    def post(self, request, pk):
+        from decimal import Decimal, InvalidOperation
+
+        data = request.data
+        try:
+            start = date.fromisoformat(str(data.get("start_date", "")))
+            end = date.fromisoformat(str(data["end_date"])) if data.get("end_date") else None
+        except ValueError:
+            return Response({"error": {"details": {"dates": ["Use dates like 2027-01-01."]}}}, status=400)
+        try:
+            rent = Decimal(str(data["rent_amount"])) if data.get("rent_amount") not in (None, "") else None
+            deposit = Decimal(str(data["deposit_amount"])) if data.get("deposit_amount") not in (None, "") else None
+        except InvalidOperation:
+            return Response({"error": {"details": {"amount": ["Enter a valid amount."]}}}, status=400)
+        frequency = data.get("rent_frequency") or None
+        if frequency and frequency not in Tenancy.Frequency.values:
+            return Response({"error": {"details": {"rent_frequency": ["Not a valid frequency."]}}}, status=400)
+        new, error = _guarded(lambda: services.renew_tenancy(
+            pk, start_date=start, end_date=end, rent_amount=rent, rent_frequency=frequency,
+            deposit_amount=deposit, notes=str(data.get("notes") or ""),
+        ))
+        if error:
+            return error
+        return Response(TenancySerializer(new).data, status=status.HTTP_201_CREATED)

@@ -374,3 +374,55 @@ def bill_maintenance(request_id, *, bill_date=None, due_days=30, post=False, pos
     if post:
         post_purchase_bill(bill, posted_by=posted_by)
     return obj
+
+
+@transaction.atomic
+def renew_tenancy(
+    tenancy_id, *, start_date, end_date=None, rent_amount=None, rent_frequency=None,
+    deposit_amount=None, notes="",
+):
+    """Renew an active tenancy on new terms (for example a rent increase). The old tenancy is
+    closed the day before `start_date` and a new active one begins for the same tenant and unit,
+    which stays occupied. Rent billing carries on from where it left off, at the new rent."""
+    old = Tenancy.objects.select_for_update().filter(pk=tenancy_id).first()
+    if old is None:
+        raise ValidationError({"tenancy": "Tenancy not found."})
+    if old.status != Tenancy.Status.ACTIVE:
+        raise ValidationError({"tenancy": "Only an active tenancy can be renewed."})
+    if start_date <= old.start_date:
+        raise ValidationError({"start_date": "The renewal must start after the current tenancy started."})
+    if end_date and end_date < start_date:
+        raise ValidationError({"end_date": "The end date cannot be before the start date."})
+    old_schedule = RentSchedule.objects.select_for_update().filter(tenancy=old, is_active=True).first()
+    if old_schedule and old_schedule.next_invoice_date < start_date:
+        raise ValidationError({
+            "start_date": "Invoice the rent periods before the renewal date first, so they are billed at the old rent."
+        })
+
+    old.status = Tenancy.Status.ENDED
+    old.end_date = start_date - timedelta(days=1)
+    old.end_reason = "Renewed"
+    old.save()
+    new = Tenancy.objects.create(
+        unit=old.unit,
+        tenant=old.tenant,
+        start_date=start_date,
+        end_date=end_date,
+        rent_amount=old.rent_amount if rent_amount is None else rent_amount,
+        rent_frequency=rent_frequency or old.rent_frequency,
+        deposit_amount=old.deposit_amount if deposit_amount is None else deposit_amount,
+        status=Tenancy.Status.ACTIVE,
+        notes=notes or old.notes,
+        renewed_from=old,
+    )
+    if old_schedule:
+        old_schedule.is_active = False
+        old_schedule.save(update_fields=["is_active", "updated_at"])
+        RentSchedule.objects.create(
+            tenancy=new,
+            revenue_account=old_schedule.revenue_account,
+            next_invoice_date=old_schedule.next_invoice_date,
+            billing_day=old_schedule.billing_day,
+            due_days=old_schedule.due_days,
+        )
+    return new

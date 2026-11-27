@@ -58,3 +58,7 @@ No accounting knowledge is needed to bill and collect rent.
 
 - Command (run daily, for example from cron): `python manage.py generate_rent_invoices [--post] [--date YYYY-MM-DD]` goes through every company, creates every rent invoice that has fallen due (catching up any missed periods, up to 24 per schedule) and, with `--post`, posts them. Running it again never duplicates a period. A schedule that cannot continue (for example the next period runs past the tenancy end) is reported and skipped; the rest carry on.
 - API: `POST /api/v1/rent-schedules/generate-due/` (`properties.lease.manage`, optional `{"post": true}`) does the same for the active company and returns `{generated, posted, skipped}`.
+
+## Renewals and rent changes
+
+`POST /api/v1/tenancies/{id}/renew/` (`properties.lease.manage`) with `{start_date, end_date?, rent_amount?, rent_frequency?, deposit_amount?, notes?}` renews an active tenancy on new terms, for example a rent increase. The old tenancy ends the day before `start_date` (reason "Renewed"), a new active tenancy begins for the same tenant and unit (which stays occupied, linked through `renewed_from`), and rent billing carries on from the next invoice date at the new rent. Rent periods before the start date must already be invoiced, so they are billed at the old rent.
