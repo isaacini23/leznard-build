@@ -94,3 +94,43 @@ def test_ledger_is_company_scoped():
     url = f"/api/v1/reports/general-ledger/?account={bank.pk}&end=2026-06-30"
     assert first.get(url, **first_headers).status_code == 200
     assert second.get(url, **second_headers).status_code == 404
+
+
+def test_account_with_postings_keeps_its_structure_but_can_be_renamed():
+    client, org_id = register("lock-owner@example.com", "Lock Ltd")
+    headers = {"HTTP_X_ORGANIZATION_ID": org_id}
+    made = client.post(
+        "/api/v1/accounts/",
+        {"code": "1020", "name": "Savings", "category": "asset", "account_type": "bank", "normal_balance": "debit"},
+        content_type="application/json", **headers,
+    ).json()
+    accounts = client.get("/api/v1/accounts/", **headers).json()
+    capital = next(a for a in accounts if a["code"] == "3000")
+    entry = client.post(
+        "/api/v1/journals/",
+        {"entry_date": "2026-01-10", "description": "Seed", "lines": [
+            {"account": made["id"], "debit": "100"},
+            {"account": capital["id"], "credit": "100"}]},
+        content_type="application/json", **headers,
+    )
+    assert entry.status_code == 201, entry.content
+    assert client.post(f"/api/v1/journals/{entry.json()['id']}/post/", **headers).status_code == 200
+
+    url = f"/api/v1/accounts/{made['id']}/"
+    refused = client.patch(url, {"account_type": "cash", "code": "9999"}, content_type="application/json", **headers)
+    assert refused.status_code == 400
+    ok = client.patch(url, {"name": "Savings (GTB)"}, content_type="application/json", **headers)
+    assert ok.status_code == 200 and ok.json()["name"] == "Savings (GTB)"
+    # an account with no postings can still be restructured
+    free = client.post(
+        "/api/v1/accounts/",
+        {"code": "1030", "name": "Spare", "category": "asset", "account_type": "bank", "normal_balance": "debit"},
+        content_type="application/json", **headers,
+    ).json()
+    assert client.patch(f"/api/v1/accounts/{free['id']}/", {"code": "1031"}, content_type="application/json", **headers).status_code == 200
+
+
+def test_new_company_accountant_role_can_manage_accounts():
+    from apps.access.permissions import DEFAULT_ROLES
+    accountant = next(r for r in DEFAULT_ROLES if r[0] == "Accountant")
+    assert "accounting.account.manage" in accountant[2]
