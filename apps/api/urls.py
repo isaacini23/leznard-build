@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import owner_reports, property_reports, property_views, rent_views, views
+from . import maintenance_views, owner_reports, property_reports, property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -50,6 +50,11 @@ urlpatterns = [
     path("documents/<uuid:pk>/", property_views.DocumentDetailView.as_view()),
     path("documents/<uuid:pk>/download/", property_views.DocumentDownloadView.as_view()),
     path("contacts/<uuid:contact_id>/tenant-profile/", property_views.TenantProfileView.as_view()),
+    path("maintenance/", maintenance_views.MaintenanceListCreateView.as_view()),
+    path("maintenance/<uuid:pk>/", maintenance_views.MaintenanceDetailView.as_view()),
+    path("maintenance/<uuid:pk>/start/", maintenance_views.MaintenanceStartView.as_view()),
+    path("maintenance/<uuid:pk>/complete/", maintenance_views.MaintenanceCompleteView.as_view()),
+    path("maintenance/<uuid:pk>/cancel/", maintenance_views.MaintenanceCancelView.as_view()),
     path("tenancies/", property_views.TenancyListCreateView.as_view()),
     path("tenancies/<uuid:pk>/", property_views.TenancyDetailView.as_view()),
     path("tenancies/<uuid:pk>/activate/", property_views.TenancyActivateView.as_view()),
