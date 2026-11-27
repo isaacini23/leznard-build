@@ -37,6 +37,7 @@ urlpatterns = [
     path("properties/", property_views.PropertyListCreateView.as_view()),
     path("properties/<uuid:pk>/", property_views.PropertyDetailView.as_view()),
     path("properties/<uuid:property_id>/profitability/", property_reports.PropertyProfitabilityView.as_view()),
+    path("properties/<uuid:property_id>/owner-statement/", property_reports.OwnerStatementView.as_view()),
     path("properties/<uuid:property_id>/buildings/", property_views.PropertyBuildingsView.as_view()),
     path("properties/<uuid:property_id>/units/", property_views.PropertyUnitsView.as_view()),
     path("properties/<uuid:property_id>/ownerships/", property_views.PropertyOwnershipsView.as_view()),

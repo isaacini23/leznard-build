@@ -105,3 +105,64 @@ def property_profitability(property_obj: Property, *, start_date, end_date):
         ),
         "expense_bill_count": len(bills),
     }
+
+
+def owner_statement(property_obj: Property, *, start_date, end_date):
+    """What the owners of a property are owed for a period: rent actually collected, less the
+    manager's fee (a percentage of rent collected) and the property's repair and running costs
+    billed in the period, split by ownership share. A negative net is carried forward by the
+    reader, not paid out."""
+    from .models import PropertyManagement, PropertyOwnership
+
+    perf = property_profitability(property_obj, start_date=start_date, end_date=end_date)
+    collected = perf["rent_collected"]
+    expenses = perf["operating_expenses"]
+
+    management = (
+        PropertyManagement.objects.filter(property=property_obj)
+        .exclude(start_date__gt=end_date)
+        .exclude(end_date__lt=start_date)
+        .order_by("-start_date")
+        .select_related("manager")
+        .first()
+    )
+    fee_percent = (management.fee_percent or ZERO) if management else ZERO
+    fee = _rounded(collected * fee_percent / Decimal("100"))
+    net = _rounded(collected - fee - expenses)
+
+    owners = list(
+        PropertyOwnership.objects.filter(property=property_obj)
+        .exclude(start_date__gt=end_date)
+        .exclude(end_date__lt=end_date)
+        .select_related("owner")
+        .order_by("created_at")
+    )
+    shares, allocated = [], ZERO
+    for index, ownership in enumerate(owners):
+        if index == len(owners) - 1 and sum((o.share_percent for o in owners), ZERO) == Decimal("100"):
+            amount = net - allocated  # last owner takes the rounding remainder
+        else:
+            amount = _rounded(net * ownership.share_percent / Decimal("100"))
+        allocated += amount
+        shares.append({
+            "owner_id": str(ownership.owner_id),
+            "owner": ownership.owner.display_name,
+            "share_percent": ownership.share_percent,
+            "amount": _rounded(amount),
+        })
+
+    return {
+        "property_id": str(property_obj.pk),
+        "property_name": property_obj.name,
+        "currency": perf["currency"],
+        "start_date": start_date,
+        "end_date": end_date,
+        "rent_collected": collected,
+        "management_fee_percent": fee_percent,
+        "management_fee": fee,
+        "manager": management.manager.display_name if management else None,
+        "expenses": expenses,
+        "net_payable_to_owners": net,
+        "owners": shares,
+        "unallocated": _rounded(net - sum((s["amount"] for s in shares), ZERO)),
+    }
