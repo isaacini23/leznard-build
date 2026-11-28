@@ -94,3 +94,94 @@ def test_ledger_is_company_scoped():
     url = f"/api/v1/reports/general-ledger/?account={bank.pk}&end=2026-06-30"
     assert first.get(url, **first_headers).status_code == 200
     assert second.get(url, **second_headers).status_code == 404
+
+
+
+def test_account_with_postings_keeps_its_structure_but_can_be_renamed():
+    client, org_id = register("lock-owner@example.com", "Lock Ltd")
+    headers = {"HTTP_X_ORGANIZATION_ID": org_id}
+    made_response = client.post(
+        "/api/v1/accounts/",
+        {"code": "1020", "name": "Savings", "category": "asset",
+         "account_type": "bank", "normal_balance": "debit"},
+        content_type="application/json", **headers,
+    )
+    assert made_response.status_code == 201, made_response.content
+    made = made_response.json()
+    capital = next(
+        account for account in client.get("/api/v1/accounts/", **headers).json()
+        if account["code"] == "3000"
+    )
+    entry = client.post(
+        "/api/v1/journals/",
+        {"entry_date": "2026-01-10", "description": "Seed", "lines": [
+            {"account": made["id"], "debit": "100"},
+            {"account": capital["id"], "credit": "100"},
+        ]},
+        content_type="application/json", **headers,
+    )
+    assert entry.status_code == 201, entry.content
+    posted = client.post(
+        f"/api/v1/journals/{entry.json()['id']}/post/", {}, 
+        content_type="application/json", **headers,
+    )
+    assert posted.status_code == 200
+
+    url = f"/api/v1/accounts/{made['id']}/"
+    refused = client.patch(
+        url, {"account_type": "cash", "code": "9999"},
+        content_type="application/json", **headers,
+    )
+    assert refused.status_code == 400
+    renamed = client.patch(
+        url, {"name": "Savings (GTB)"},
+        content_type="application/json", **headers,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Savings (GTB)"
+
+    free = client.post(
+        "/api/v1/accounts/",
+        {"code": "1030", "name": "Spare", "category": "asset",
+         "account_type": "bank", "normal_balance": "debit"},
+        content_type="application/json", **headers,
+    ).json()
+    assert client.patch(
+        f"/api/v1/accounts/{free['id']}/", {"code": "1031"},
+        content_type="application/json", **headers,
+    ).status_code == 200
+
+
+def test_account_rejects_inconsistent_normal_balance():
+    client, org_id = register("normal-balance@example.com", "Normal Balance Ltd")
+    response = client.post(
+        "/api/v1/accounts/",
+        {"code": "1020", "name": "Incorrect Bank", "category": "asset",
+         "account_type": "bank", "normal_balance": "credit"},
+        content_type="application/json",
+        HTTP_X_ORGANIZATION_ID=org_id,
+    )
+    assert response.status_code == 400
+    assert "normal_balance" in response.json()["error"]["details"]
+
+
+def test_new_company_accountant_role_can_manage_accounts():
+    from apps.access.permissions import DEFAULT_ROLES
+
+    accountant = next(role for role in DEFAULT_ROLES if role[0] == "Accountant")
+    assert "accounting.account.manage" in accountant[2]
+
+
+def test_account_balances_default_to_local_date(monkeypatch):
+    from datetime import date as date_type
+    from django.utils import timezone as django_timezone
+
+    client, org_id = register("balances-date@example.com", "Balances Date Ltd")
+    expected = date_type(2026, 11, 28)
+    monkeypatch.setattr(django_timezone, "localdate", lambda: expected)
+    response = client.get(
+        "/api/v1/reports/account-balances/",
+        HTTP_X_ORGANIZATION_ID=org_id,
+    )
+    assert response.status_code == 200
+    assert response.json()["as_of"] == expected.isoformat()
