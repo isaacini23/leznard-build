@@ -191,6 +191,45 @@ def post_journal_entry(entry, *, posted_by=None):
                     {"account": f"Account {line.account.code} is inactive and cannot be posted to."}
                 )
 
+        if locked.is_year_end_closing:
+            from datetime import date, timedelta
+
+            from apps.organizations.models import Organization
+
+            organization = Organization.objects.get(pk=locked.organization_id)
+            fiscal_start_month = organization.fiscal_year_start_month
+            next_fiscal_start = date(
+                locked.closing_period_end.year
+                + (locked.closing_period_end.month >= fiscal_start_month),
+                fiscal_start_month,
+                1,
+            )
+            if locked.closing_period_end != next_fiscal_start - timedelta(days=1):
+                raise ValidationError(
+                    {"closing_period_end": "The selected date is not the end of a fiscal year."}
+                )
+
+            retained_lines = [
+                line for line in lines
+                if line.account.account_type == Account.AccountType.RETAINED_EARNINGS
+            ]
+            profit_loss_lines = [
+                line for line in lines
+                if line.account.category in (
+                    Account.Category.INCOME, Account.Category.EXPENSE
+                )
+            ]
+            if not retained_lines or not profit_loss_lines:
+                raise ValidationError(
+                    "A year-end closing journal must transfer profit or loss "
+                    "between income/expense accounts and retained earnings."
+                )
+            if len(retained_lines) + len(profit_loss_lines) != len(lines):
+                raise ValidationError(
+                    "A year-end closing journal may contain only income, expense "
+                    "and retained-earnings accounts."
+                )
+
         debit_total = sum((line.debit_amount for line in lines), Decimal("0"))
         credit_total = sum((line.credit_amount for line in lines), Decimal("0"))
         if debit_total != credit_total:
