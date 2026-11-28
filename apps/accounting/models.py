@@ -320,6 +320,20 @@ class JournalLine(TenantModel):
             raise ValidationError({"account": "Account must belong to the same company as the journal."})
         if self.entry_id and self.entry.status != JournalEntry.Status.DRAFT:
             raise ValidationError("Lines on posted or reversed entries cannot be changed.")
+        if self.cash_flow_category and self.account_id:
+            if self.account.account_type in (
+                Account.AccountType.CASH, Account.AccountType.BANK
+            ):
+                raise ValidationError({
+                    "cash_flow_category": "Cash-flow classifications belong on the non-cash counterpart line."
+                })
+            if (
+                self.cash_flow_category == self.CashFlowCategory.NON_CASH_ADJUSTMENT
+                and self.account.category not in (Account.Category.INCOME, Account.Category.EXPENSE)
+            ):
+                raise ValidationError({
+                    "cash_flow_category": "Non-cash adjustments must be assigned to an income or expense account."
+                })
         debit = self.debit_amount or 0
         credit = self.credit_amount or 0
         if debit < 0 or credit < 0:
