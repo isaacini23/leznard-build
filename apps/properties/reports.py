@@ -1,6 +1,8 @@
 """Property-level profitability derived from posted invoices, receipts and purchase bills."""
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.db.models import Q
+
 from apps.payments.models import Payment, PaymentAllocation
 from apps.sales.models import PurchaseBill
 
@@ -130,24 +132,38 @@ def owner_statement(property_obj: Property, *, start_date, end_date):
     fee = _rounded(collected * fee_percent / Decimal("100"))
     net = _rounded(collected - fee - expenses)
 
+    # Include every ownership record that overlaps any part of the statement
+    # period. Weight each share by the number of days it was effective so a former
+    # owner is not dropped merely because their ownership ended before period end.
     owners = list(
         PropertyOwnership.objects.filter(property=property_obj)
-        .exclude(start_date__gt=end_date)
-        .exclude(end_date__lt=end_date)
+        .filter(Q(start_date__isnull=True) | Q(start_date__lte=end_date))
+        .filter(Q(end_date__isnull=True) | Q(end_date__gte=start_date))
         .select_related("owner")
         .order_by("created_at")
     )
+    period_days = Decimal((end_date - start_date).days + 1)
+    owner_shares = []
+    for ownership in owners:
+        active_start = max(start_date, ownership.start_date) if ownership.start_date else start_date
+        active_end = min(end_date, ownership.end_date) if ownership.end_date else end_date
+        active_days = Decimal((active_end - active_start).days + 1)
+        weighted_share = ownership.share_percent * active_days / period_days
+        owner_shares.append((ownership, weighted_share))
+
+    total_weighted_share = sum((share for _, share in owner_shares), ZERO)
     shares, allocated = [], ZERO
-    for index, ownership in enumerate(owners):
-        if index == len(owners) - 1 and sum((o.share_percent for o in owners), ZERO) == Decimal("100"):
+    for index, (ownership, weighted_share) in enumerate(owner_shares):
+        if index == len(owner_shares) - 1 and total_weighted_share == Decimal("100"):
             amount = net - allocated  # last owner takes the rounding remainder
         else:
-            amount = _rounded(net * ownership.share_percent / Decimal("100"))
+            amount = _rounded(net * weighted_share / Decimal("100"))
         allocated += amount
         shares.append({
             "owner_id": str(ownership.owner_id),
             "owner": ownership.owner.display_name,
             "share_percent": ownership.share_percent,
+            "period_share_percent": weighted_share.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
             "amount": _rounded(amount),
         })
 

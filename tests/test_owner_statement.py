@@ -59,3 +59,54 @@ def test_no_management_no_owners_and_validation_and_permissions():
     assert statement(emp, org, prop).status_code == 403
     other, other_org = register("second@example.com", "Other Co")
     assert statement(other, other_org, prop).status_code == 404
+
+
+def test_statement_includes_owners_whose_ownership_ended_during_period():
+    from datetime import date
+    from decimal import Decimal
+
+    from apps.core.tenancy import organization_context
+    from apps.properties.models import PropertyOwnership
+
+    c, org = register()
+    prop, tenant, invoice_id = create_property_rent_invoice(c, org)
+
+    # Create collected rent so the ownership allocation has a positive amount to split.
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+    with organization_context(org):
+        bank = Account.objects.get(account_type="bank")
+    receipt = call(c, "post", "/api/v1/payments/", org, {
+        "payment_type": "customer_receipt", "payment_date": "2027-01-15",
+        "contact": tenant["id"], "account": str(bank.pk), "amount": "100000",
+        "currency": "NGN",
+        "allocations": [{"sales_invoice": invoice_id, "amount": "100000"}],
+    })
+    assert receipt.status_code == 201, receipt.content
+    assert call(c, "post", f"/api/v1/payments/{receipt.json()['id']}/post/", org).status_code == 200
+
+    owner_old = make_contact(c, org, "Former Owner", "property_owner")
+    owner_continuing = make_contact(c, org, "Continuing Owner", "landlord")
+    owner_new = make_contact(c, org, "New Owner", "property_owner")
+    with organization_context(org):
+        PropertyOwnership.objects.create(
+            property_id=prop["id"], owner_id=owner_old["id"], share_percent=Decimal("60"),
+            start_date=date(2027, 1, 1), end_date=date(2027, 1, 15),
+        )
+        PropertyOwnership.objects.create(
+            property_id=prop["id"], owner_id=owner_continuing["id"], share_percent=Decimal("40"),
+            start_date=date(2027, 1, 1),
+        )
+        PropertyOwnership.objects.create(
+            property_id=prop["id"], owner_id=owner_new["id"], share_percent=Decimal("60"),
+            start_date=date(2027, 1, 16),
+        )
+
+    response = statement(c, org, prop)
+    assert response.status_code == 200, response.content
+    body = response.json()
+    amounts = {owner["owner"]: Decimal(owner["amount"]) for owner in body["owners"]}
+    assert set(amounts) == {"Former Owner", "Continuing Owner", "New Owner"}
+    assert sum(amounts.values()) == Decimal(body["net_payable_to_owners"])
+    assert amounts["Former Owner"] > 0
+    assert amounts["New Owner"] > 0
