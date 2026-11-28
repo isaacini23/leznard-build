@@ -577,6 +577,10 @@ class MaintenanceRequest(TenantModel):
                 organization_id=self.organization_id, contact=contact, role__in=roles
             ).exists():
                 raise ValidationError({field: f"This contact must be {label}."})
+        if self.estimated_cost is not None and not self.estimated_cost.is_finite():
+            raise ValidationError({"estimated_cost": "Enter a finite amount."})
+        if self.actual_cost is not None and not self.actual_cost.is_finite():
+            raise ValidationError({"actual_cost": "Enter a finite amount."})
         if self.estimated_cost is not None and self.estimated_cost < 0:
             raise ValidationError({"estimated_cost": "Cost cannot be negative."})
         if self.actual_cost is not None and self.actual_cost < 0:
