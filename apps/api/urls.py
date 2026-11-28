@@ -40,6 +40,7 @@ urlpatterns = [
     path("reports/cash-flow/", accounting_views.CashFlowStatementView.as_view()),
     path("reports/comparative-income-statement/", accounting_views.ComparativeIncomeStatementView.as_view()),
     path("reports/comparative-balance-sheet/", accounting_views.ComparativeBalanceSheetView.as_view()),
+    path("reports/comparative-cash-flow/", accounting_views.ComparativeCashFlowStatementView.as_view()),
     path("periods/", views.PeriodListView.as_view()),
     path("periods/<uuid:period_id>/close/", views.ClosePeriodView.as_view()),
     path("periods/<uuid:period_id>/reopen/", views.ReopenPeriodView.as_view()),
