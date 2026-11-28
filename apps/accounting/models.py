@@ -209,6 +209,7 @@ class JournalEntry(TenantModel):
         REVERSED = "reversed", "Reversed"
 
     entry_date = models.DateField()
+    is_year_end_closing = models.BooleanField(default=False)
     reference = models.CharField(max_length=50, blank=True)
     description = models.CharField(max_length=255)
     currency = models.CharField(max_length=3)
