@@ -17,13 +17,15 @@ def _money(value):
     return (value or Decimal("0")).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
-def _totals(*, start_date=None, end_date):
+def _totals(*, start_date=None, end_date, exclude_year_end_closing=False):
     """Return {account_id: (debit, credit)} for counted lines up to `end_date`."""
     lines = JournalLine.objects.filter(
         entry__status__in=COUNTED, entry__entry_date__lte=end_date
     )
     if start_date is not None:
         lines = lines.filter(entry__entry_date__gte=start_date)
+    if exclude_year_end_closing:
+        lines = lines.filter(entry__is_year_end_closing=False)
     rows = lines.values("account_id").annotate(
         debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount")
     )
@@ -65,7 +67,10 @@ def trial_balance(*, as_of):
 
 def income_statement(*, start_date, end_date):
     """Income, cost of sales and expenses for the date range, ending in net profit."""
-    totals = _totals(start_date=start_date, end_date=end_date)
+    totals = _totals(
+        start_date=start_date, end_date=end_date,
+        exclude_year_end_closing=True,
+    )
     accounts = Account.objects.filter(
         id__in=totals.keys(),
         category__in=[Account.Category.INCOME, Account.Category.EXPENSE],
@@ -140,6 +145,26 @@ def retained_earnings(*, as_of):
         prior_profit = income_statement(
             start_date=date.min, end_date=year_start - timedelta(days=1)
         )["net_profit"]
+
+    # A closing journal can be posted at year-end or after the new fiscal year
+    # begins. Track those transfers explicitly so the prior profit is removed
+    # from "unclosed" earnings exactly once. Reversals retain the flag and net
+    # the transfer back out.
+    closing_transfer = JournalLine.objects.filter(
+        entry__status__in=COUNTED,
+        entry__is_year_end_closing=True,
+        entry__entry_date__lte=as_of,
+        account__account_type=Account.AccountType.RETAINED_EARNINGS,
+    ).aggregate(
+        debit=Sum("base_debit_amount"),
+        credit=Sum("base_credit_amount"),
+    )
+    closing_transfer_amount = (
+        (closing_transfer["credit"] or Decimal("0"))
+        - (closing_transfer["debit"] or Decimal("0"))
+    )
+    prior_profit -= closing_transfer_amount
+
     current_profit = income_statement(
         start_date=year_start, end_date=as_of
     )["net_profit"]
