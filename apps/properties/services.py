@@ -207,17 +207,15 @@ def record_rent_payment(
     if amount > due:
         raise ValidationError({"amount": f"That is more than the {due:.2f} still owed."})
 
-    org_id = get_current_org_id()
-    if account_id:
-        account = Account.objects.filter(pk=account_id).first()
-        if account is None:
-            raise ValidationError({"account": "Account not found."})
-    else:
-        account = Account.objects.filter(
-            account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH), is_active=True
-        ).order_by("account_type", "code").first()
-        if account is None:
-            raise ValidationError({"account": "Add a bank or cash account first."})
+    if not account_id:
+        raise ValidationError({"account": "Select the bank or cash account receiving this rent payment."})
+    account = Account.objects.filter(
+        pk=account_id,
+        account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH),
+        is_active=True,
+    ).first()
+    if account is None:
+        raise ValidationError({"account": "Select an active bank or cash account belonging to this company."})
 
     payment = Payment.objects.create(
         payment_type=Payment.Type.CUSTOMER_RECEIPT,
