@@ -85,6 +85,12 @@ def test_deposit_requires_explicit_account_and_rejects_rounded_zero_or_overpayme
     )
     assert sub_kobo.status_code == 400
 
+    fractional_kobo = call(
+        c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org,
+        {"amount": "1.001", "account": account_id},
+    )
+    assert fractional_kobo.status_code == 400
+
     overpayment = call(
         c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org,
         {"amount": "200001", "account": account_id},
