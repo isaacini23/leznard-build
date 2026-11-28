@@ -209,6 +209,8 @@ class JournalEntry(TenantModel):
         REVERSED = "reversed", "Reversed"
 
     entry_date = models.DateField()
+    is_year_end_closing = models.BooleanField(default=False)
+    closing_period_end = models.DateField(null=True, blank=True)
     reference = models.CharField(max_length=50, blank=True)
     description = models.CharField(max_length=255)
     currency = models.CharField(max_length=3)
@@ -241,6 +243,18 @@ class JournalEntry(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.is_year_end_closing and not self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "Select the fiscal period end date being closed."
+            })
+        if not self.is_year_end_closing and self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "Only year-end closing journals may set this date."
+            })
+        if self.closing_period_end and self.entry_date < self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "A closing journal cannot be dated before the period it closes."
+            })
         if self.currency:
             self.currency = self.currency.upper()
         if self.base_currency:
@@ -271,6 +285,15 @@ class JournalEntry(TenantModel):
 
 
 class JournalLine(TenantModel):
+    class CashFlowCategory(models.TextChoices):
+        OPERATING = "operating", "Operating"
+        INVESTING = "investing", "Investing"
+        FINANCING = "financing", "Financing"
+        NON_CASH_ADJUSTMENT = "non_cash_adjustment", "Non-cash adjustment"
+
+    cash_flow_category = models.CharField(
+        max_length=24, choices=CashFlowCategory.choices, blank=True, default=""
+    )
     entry = models.ForeignKey(
         JournalEntry, on_delete=models.PROTECT, related_name="lines"
     )
@@ -297,6 +320,20 @@ class JournalLine(TenantModel):
             raise ValidationError({"account": "Account must belong to the same company as the journal."})
         if self.entry_id and self.entry.status != JournalEntry.Status.DRAFT:
             raise ValidationError("Lines on posted or reversed entries cannot be changed.")
+        if self.cash_flow_category and self.account_id:
+            if self.account.account_type in (
+                Account.AccountType.CASH, Account.AccountType.BANK
+            ):
+                raise ValidationError({
+                    "cash_flow_category": "Cash-flow classifications belong on the non-cash counterpart line."
+                })
+            if (
+                self.cash_flow_category == self.CashFlowCategory.NON_CASH_ADJUSTMENT
+                and self.account.category not in (Account.Category.INCOME, Account.Category.EXPENSE)
+            ):
+                raise ValidationError({
+                    "cash_flow_category": "Non-cash adjustments must be assigned to an income or expense account."
+                })
         debit = self.debit_amount or 0
         credit = self.credit_amount or 0
         if debit < 0 or credit < 0:

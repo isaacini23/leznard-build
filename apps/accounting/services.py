@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Sum
 
 from apps.core.tenancy import organization_context
 
@@ -103,6 +104,8 @@ def create_journal_entry(
     exchange_rate=None,
     reference="",
     reversal_of=None,
+    is_year_end_closing=False,
+    closing_period_end=None,
 ):
     """Create a draft journal and its lines within the supplied organization."""
     base_currency = organization.base_currency.upper()
@@ -123,6 +126,8 @@ def create_journal_entry(
             organization=organization,
             entry_date=entry_date,
             reference=reference,
+            is_year_end_closing=is_year_end_closing,
+            closing_period_end=closing_period_end,
             description=description,
             currency=currency,
             base_currency=base_currency,
@@ -148,6 +153,7 @@ def create_journal_entry(
                 entry=entry,
                 account=account,
                 description=item.get("description", ""),
+                cash_flow_category=item.get("cash_flow_category", ""),
                 debit_amount=debit,
                 credit_amount=credit,
                 base_debit_amount=base_debit,
@@ -185,6 +191,149 @@ def post_journal_entry(entry, *, posted_by=None):
                 raise ValidationError(
                     {"account": f"Account {line.account.code} is inactive and cannot be posted to."}
                 )
+
+        if locked.is_year_end_closing:
+            from datetime import date, timedelta
+
+            from apps.organizations.models import Organization
+
+            organization = Organization.objects.get(pk=locked.organization_id)
+            fiscal_start_month = organization.fiscal_year_start_month
+            next_fiscal_start = date(
+                locked.closing_period_end.year
+                + (locked.closing_period_end.month >= fiscal_start_month),
+                fiscal_start_month,
+                1,
+            )
+            if locked.closing_period_end != next_fiscal_start - timedelta(days=1):
+                raise ValidationError(
+                    {"closing_period_end": "The selected date is not the end of a fiscal year."}
+                )
+
+            fiscal_year = (
+                locked.closing_period_end.year
+                if locked.closing_period_end.month >= fiscal_start_month
+                else locked.closing_period_end.year - 1
+            )
+            fiscal_year_start = date(fiscal_year, fiscal_start_month, 1)
+
+            active_close = JournalEntry.unscoped.filter(
+                organization_id=locked.organization_id,
+                is_year_end_closing=True,
+                closing_period_end=locked.closing_period_end,
+                status=JournalEntry.Status.POSTED,
+                reversal_of__isnull=True,
+            ).exclude(pk=locked.pk)
+            if locked.reversal_of_id:
+                active_close = active_close.exclude(pk=locked.reversal_of_id)
+            if active_close.exists():
+                raise ValidationError(
+                    {"closing_period_end": "This fiscal year already has an active closing journal."}
+                )
+
+            retained_lines = [
+                line for line in lines
+                if line.account.account_type == Account.AccountType.RETAINED_EARNINGS
+            ]
+            profit_loss_lines = [
+                line for line in lines
+                if line.account.category in (
+                    Account.Category.INCOME, Account.Category.EXPENSE
+                )
+            ]
+            if not retained_lines or not profit_loss_lines:
+                raise ValidationError(
+                    "A year-end closing journal must transfer profit or loss "
+                    "between income/expense accounts and retained earnings."
+                )
+            if len(retained_lines) + len(profit_loss_lines) != len(lines):
+                raise ValidationError(
+                    "A year-end closing journal may contain only income, expense "
+                    "and retained-earnings accounts."
+                )
+
+            if locked.reversal_of_id:
+                original = JournalEntry.unscoped.get(pk=locked.reversal_of_id)
+                if (
+                    not original.is_year_end_closing
+                    or original.closing_period_end != locked.closing_period_end
+                ):
+                    raise ValidationError(
+                        "A closing reversal must reference a closing journal for the same fiscal year."
+                    )
+                original_totals = {}
+                for line in JournalLine.unscoped.filter(entry=original):
+                    original_totals[line.account_id] = (
+                        original_totals.get(line.account_id, Decimal("0"))
+                        + line.base_debit_amount - line.base_credit_amount
+                    )
+                reversal_totals = {}
+                for line in lines:
+                    reversal_totals[line.account_id] = (
+                        reversal_totals.get(line.account_id, Decimal("0"))
+                        + line.base_debit_amount - line.base_credit_amount
+                    )
+                expected_reversal = {
+                    account_id: -amount for account_id, amount in original_totals.items()
+                    if amount
+                }
+                actual_reversal = {
+                    account_id: amount for account_id, amount in reversal_totals.items()
+                    if amount
+                }
+                if actual_reversal != expected_reversal:
+                    raise ValidationError(
+                        "A closing reversal must exactly reverse the original closing journal."
+                    )
+            else:
+                prior_rows = JournalLine.unscoped.filter(
+                    organization_id=locked.organization_id,
+                    entry__status__in=(JournalEntry.Status.POSTED, JournalEntry.Status.REVERSED),
+                    entry__entry_date__gte=fiscal_year_start,
+                    entry__entry_date__lte=locked.closing_period_end,
+                    entry__is_year_end_closing=False,
+                    account__category__in=(Account.Category.INCOME, Account.Category.EXPENSE),
+                ).values("account_id").annotate(
+                    debit=Sum("base_debit_amount"),
+                    credit=Sum("base_credit_amount"),
+                )
+                expected_closures = {
+                    row["account_id"]: (row["debit"] or Decimal("0")) - (row["credit"] or Decimal("0"))
+                    for row in prior_rows
+                    if (row["debit"] or Decimal("0")) != (row["credit"] or Decimal("0"))
+                }
+                actual_closures = {}
+                for line in profit_loss_lines:
+                    actual_closures[line.account_id] = (
+                        actual_closures.get(line.account_id, Decimal("0"))
+                        + line.base_credit_amount - line.base_debit_amount
+                    )
+                expected_closures = {
+                    account_id: amount for account_id, amount in expected_closures.items()
+                    if amount
+                }
+                actual_closures = {
+                    account_id: amount for account_id, amount in actual_closures.items()
+                    if amount
+                }
+                if actual_closures != expected_closures:
+                    raise ValidationError(
+                        "The closing journal must clear every income and expense account "
+                        "to its exact balance for the fiscal year being closed."
+                    )
+
+                retained_transfer = sum(
+                    (line.base_debit_amount - line.base_credit_amount for line in retained_lines),
+                    Decimal("0"),
+                )
+                required_transfer = sum(
+                    (line.base_credit_amount - line.base_debit_amount for line in profit_loss_lines),
+                    Decimal("0"),
+                )
+                if retained_transfer != required_transfer:
+                    raise ValidationError(
+                        "The retained-earnings transfer must equal the fiscal year's actual net profit or loss."
+                    )
 
         debit_total = sum((line.debit_amount for line in lines), Decimal("0"))
         credit_total = sum((line.credit_amount for line in lines), Decimal("0"))
@@ -225,6 +374,7 @@ def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by
             {
                 "account": line.account,
                 "description": line.description,
+                "cash_flow_category": line.cash_flow_category,
                 "debit": line.credit_amount,
                 "credit": line.debit_amount,
             }
@@ -239,6 +389,8 @@ def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by
             exchange_rate=original.exchange_rate,
             lines=reversal_lines,
             reversal_of=original,
+            is_year_end_closing=original.is_year_end_closing,
+            closing_period_end=original.closing_period_end,
         )
         post_journal_entry(reversal, posted_by=posted_by)
         JournalEntry.unscoped.filter(pk=original.pk).update(

@@ -13,6 +13,10 @@ from rest_framework.views import APIView
 
 from apps.access.drf import require
 from apps.accounting.models import Account, JournalEntry, JournalLine
+from apps.accounting.reports import (
+    balance_sheet, cash_flow_statement, comparative_balance_sheet,
+    comparative_cash_flow_statement, comparative_income_statement, retained_earnings,
+)
 from apps.accounting.services import create_journal_entry, post_journal_entry, reverse_journal_entry
 from apps.core.tenancy import get_current_org_id
 from apps.organizations.models import Organization
@@ -29,7 +33,10 @@ def _error(exc):
 
 def _date(value, field):
     try:
-        return date.fromisoformat(value)
+        parsed = date.fromisoformat(value)
+        if not isinstance(value, str) or parsed.isoformat() != value:
+            raise ValueError
+        return parsed
     except (TypeError, ValueError):
         raise ValidationError({field: "Use an ISO date in YYYY-MM-DD format."})
 
@@ -48,14 +55,19 @@ def _journal_payload(entry):
     lines = entry.lines.select_related("account").order_by("created_at", "id")
     return {
         "id": str(entry.pk), "entry_date": entry.entry_date,
-        "reference": entry.reference, "description": entry.description,
+        "reference": entry.reference,
+        "is_year_end_closing": entry.is_year_end_closing,
+        "closing_period_end": entry.closing_period_end,
+        "description": entry.description,
         "currency": entry.currency, "base_currency": entry.base_currency,
         "exchange_rate": str(entry.exchange_rate), "status": entry.status,
         "posted_at": entry.posted_at,
         "lines": [{
             "id": str(line.pk), "account_id": str(line.account_id),
             "account_code": line.account.code, "account_name": line.account.name,
-            "description": line.description, "debit": str(line.debit_amount),
+            "description": line.description,
+            "cash_flow_category": line.cash_flow_category,
+            "debit": str(line.debit_amount),
             "credit": str(line.credit_amount),
             "base_debit": str(line.base_debit_amount),
             "base_credit": str(line.base_credit_amount),
@@ -157,6 +169,9 @@ class JournalListCreateView(APIView):
                 entry_date=entry_date, description=data.get("description", "").strip(),
                 reference=data.get("reference", ""), currency=data.get("currency"),
                 exchange_rate=data.get("exchange_rate"), lines=lines,
+                is_year_end_closing=data.get("is_year_end_closing", False),
+                closing_period_end=_date(data.get("closing_period_end"), "closing_period_end")
+                if data.get("closing_period_end") else None,
             )
         except (ValidationError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ValidationError):
@@ -269,3 +284,102 @@ class AccountBalancesView(APIView):
                 "credit_total": str(credit), "balance": str(debit - credit),
             })
         return Response({"as_of": as_of, "accounts": rows})
+
+
+
+class BalanceSheetView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            as_of = _date(request.query_params.get("as_of"), "as_of")
+            report = balance_sheet(as_of=as_of)
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
+
+
+class RetainedEarningsView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            as_of = _date(request.query_params.get("as_of"), "as_of")
+            report = retained_earnings(as_of=as_of)
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
+
+
+class CashFlowStatementView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            start = _date(request.query_params.get("start"), "start")
+            end = _date(request.query_params.get("end"), "end")
+            if end < start:
+                raise ValidationError({"end": "The end date cannot be before the start date."})
+            report = cash_flow_statement(start_date=start, end_date=end)
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
+
+
+class ComparativeIncomeStatementView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            start = _date(request.query_params.get("start"), "start")
+            end = _date(request.query_params.get("end"), "end")
+            compare_start = _date(request.query_params.get("compare_start"), "compare_start")
+            compare_end = _date(request.query_params.get("compare_end"), "compare_end")
+            if end < start:
+                raise ValidationError({"end": "The current period end cannot be before its start."})
+            if compare_end < compare_start:
+                raise ValidationError({"compare_end": "The comparison period end cannot be before its start."})
+            report = comparative_income_statement(
+                start_date=start, end_date=end,
+                compare_start=compare_start, compare_end=compare_end,
+            )
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
+
+
+class ComparativeBalanceSheetView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            as_of = _date(request.query_params.get("as_of"), "as_of")
+            compare_as_of = _date(request.query_params.get("compare_as_of"), "compare_as_of")
+            report = comparative_balance_sheet(
+                as_of=as_of, compare_as_of=compare_as_of
+            )
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
+
+
+class ComparativeCashFlowStatementView(APIView):
+    permission_classes = [IsAuthenticated, require("reports.report.view")]
+
+    def get(self, request):
+        try:
+            start = _date(request.query_params.get("start"), "start")
+            end = _date(request.query_params.get("end"), "end")
+            compare_start = _date(request.query_params.get("compare_start"), "compare_start")
+            compare_end = _date(request.query_params.get("compare_end"), "compare_end")
+            if end < start:
+                raise ValidationError({"end": "The current period end cannot be before its start."})
+            if compare_end < compare_start:
+                raise ValidationError({"compare_end": "The comparison period end cannot be before its start."})
+            report = comparative_cash_flow_statement(
+                start_date=start, end_date=end,
+                compare_start=compare_start, compare_end=compare_end,
+            )
+        except ValidationError as exc:
+            return _error(exc)
+        return Response(report)
