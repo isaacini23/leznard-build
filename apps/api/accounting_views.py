@@ -59,7 +59,9 @@ def _journal_payload(entry):
         "lines": [{
             "id": str(line.pk), "account_id": str(line.account_id),
             "account_code": line.account.code, "account_name": line.account.name,
-            "description": line.description, "debit": str(line.debit_amount),
+            "description": line.description,
+            "cash_flow_category": line.cash_flow_category,
+            "debit": str(line.debit_amount),
             "credit": str(line.credit_amount),
             "base_debit": str(line.base_debit_amount),
             "base_credit": str(line.base_credit_amount),
