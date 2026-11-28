@@ -1,5 +1,5 @@
 """Owner-facing summary reports."""
-from datetime import date
+from django.utils import timezone
 
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,7 +16,7 @@ class OwnerSummaryView(APIView):
     permission_classes = [IsAuthenticated, require("reports.report.view")]
 
     def get(self, request):
-        today = date.today()
+        today = timezone.localdate()
         raw = request.query_params.get("month")
         try:
             year, month = (int(p) for p in raw.split("-")) if raw else (today.year, today.month)
@@ -32,7 +32,7 @@ class RentRollView(APIView):
     permission_classes = [IsAuthenticated, require("properties.lease.view")]
 
     def get(self, request):
-        rows = rent_roll(date.today())
+        rows = rent_roll(timezone.localdate())
         if request.query_params.get("overdue") == "1":
             rows = [r for r in rows if r["days_overdue"]]
         return Response(rows)
