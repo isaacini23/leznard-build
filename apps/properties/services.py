@@ -235,6 +235,9 @@ def record_rent_payment(
 
 
 
+MAX_CATCH_UP_PERIODS = 24
+
+
 def generate_due_rent_invoices(today, *, post=False, posted_by=None):
     """For the active company: create every rent invoice that has fallen due on or before
     `today`, catching up missed periods, and optionally post them. Safe to run repeatedly:
