@@ -3,7 +3,7 @@ from datetime import timedelta
 import uuid
 
 from django.core.exceptions import ValidationError
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 
@@ -433,14 +433,29 @@ def renew_tenancy(
 DEPOSIT_ACCOUNT_CODE = "2300"
 
 
+@transaction.atomic
 def _deposit_liability_account():
-    account = Account.objects.filter(code=DEPOSIT_ACCOUNT_CODE).first()
-    if account is None:
-        account = Account.objects.create(
-            code=DEPOSIT_ACCOUNT_CODE, name="Tenant Deposits Held",
-            category=Account.Category.LIABILITY, account_type=Account.AccountType.OTHER_LIABILITY,
-            normal_balance=Account.NormalBalance.CREDIT, is_system=True,
-        )
+    account, _ = Account.objects.get_or_create(
+        code=DEPOSIT_ACCOUNT_CODE,
+        defaults={
+            "name": "Tenant Deposits Held",
+            "category": Account.Category.LIABILITY,
+            "account_type": Account.AccountType.OTHER_LIABILITY,
+            "normal_balance": Account.NormalBalance.CREDIT,
+            "is_system": True,
+        },
+    )
+    if (
+        account.category != Account.Category.LIABILITY
+        or account.account_type != Account.AccountType.OTHER_LIABILITY
+        or account.normal_balance != Account.NormalBalance.CREDIT
+        or not account.is_active
+    ):
+        raise ValidationError({
+            "deposit_account": (
+                "Account 2300 must be an active Other Liability account with a credit normal balance."
+            )
+        })
     return account
 
 
@@ -467,16 +482,13 @@ def deposit_summary(tenancy):
 
 
 def _bank_or_cash(account_id):
-    if account_id:
-        account = Account.objects.filter(pk=account_id).first()
-        if account is None:
-            raise ValidationError({"account": "Account not found."})
-    else:
-        account = Account.objects.filter(
-            account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH), is_active=True
-        ).order_by("account_type", "code").first()
-        if account is None:
-            raise ValidationError({"account": "Add a bank or cash account first."})
+    if not account_id:
+        raise ValidationError({"account": "Select the bank or cash account that received or paid the deposit."})
+    account = Account.objects.filter(pk=account_id).first()
+    if account is None:
+        raise ValidationError({"account": "Account not found in this company."})
+    if not account.is_active:
+        raise ValidationError({"account": "Choose an active bank or cash account."})
     if account.account_type not in (Account.AccountType.BANK, Account.AccountType.CASH):
         raise ValidationError({"account": "Choose a bank or cash account."})
     return account
@@ -485,11 +497,14 @@ def _bank_or_cash(account_id):
 def _positive(amount, field="amount"):
     try:
         value = Decimal(str(amount))
-    except Exception:
-        raise ValidationError({field: "Enter a valid amount."})
-    if value <= 0:
-        raise ValidationError({field: "Enter an amount above zero."})
-    return value.quantize(Decimal("0.01"))
+        if not value.is_finite():
+            raise InvalidOperation
+        rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({field: "Enter a valid amount with no more than two decimal places."})
+    if rounded <= 0:
+        raise ValidationError({field: "Enter an amount of at least 0.01."})
+    return rounded
 
 
 def _post_deposit_movement(tenancy, kind, amount, day, account, lines, description, reason, posted_by):
@@ -524,9 +539,14 @@ def receive_deposit(tenancy_id, *, amount=None, date=None, account_id=None, post
     if tenancy.status == Tenancy.Status.ENDED:
         raise ValidationError({"tenancy": "A deposit cannot be received for an ended tenancy."})
     summary = deposit_summary(tenancy)
+    remaining_agreed = tenancy.deposit_amount - summary["received"]
+    if remaining_agreed <= 0:
+        raise ValidationError({"amount": "The agreed security deposit has already been received."})
     if amount in (None, ""):
-        amount = tenancy.deposit_amount - summary["received"]
+        amount = remaining_agreed
     amount = _positive(amount)
+    if amount > remaining_agreed:
+        raise ValidationError({"amount": f"The remaining agreed deposit is {remaining_agreed:.2f}."})
     bank = _bank_or_cash(account_id)
     liability = _deposit_liability_account()
     return _post_deposit_movement(
