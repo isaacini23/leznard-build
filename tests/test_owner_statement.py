@@ -70,6 +70,21 @@ def test_statement_includes_owners_whose_ownership_ended_during_period():
 
     c, org = register()
     prop, tenant, invoice_id = create_property_rent_invoice(c, org)
+
+    # Create collected rent so the ownership allocation has a positive amount to split.
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+    with organization_context(org):
+        bank = Account.objects.get(account_type="bank")
+    receipt = call(c, "post", "/api/v1/payments/", org, {
+        "payment_type": "customer_receipt", "payment_date": "2027-01-15",
+        "contact": tenant["id"], "account": str(bank.pk), "amount": "100000",
+        "currency": "NGN",
+        "allocations": [{"sales_invoice": invoice_id, "amount": "100000"}],
+    })
+    assert receipt.status_code == 201, receipt.content
+    assert call(c, "post", f"/api/v1/payments/{receipt.json()['id']}/post/", org).status_code == 200
+
     owner_old = make_contact(c, org, "Former Owner", "property_owner")
     owner_continuing = make_contact(c, org, "Continuing Owner", "landlord")
     owner_new = make_contact(c, org, "New Owner", "property_owner")
