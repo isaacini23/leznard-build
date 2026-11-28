@@ -291,7 +291,9 @@ def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
         {"account": "3100", "credit": "400.00"},
     ], is_year_end_closing=True)
     from apps.accounting.services import reverse_journal_entry
-    reverse_journal_entry(closing, entry_date=date(2026, 1, 3))
+    reversal = reverse_journal_entry(closing, entry_date=date(2026, 1, 3))
+    assert reversal.is_year_end_closing is True
+    assert reversal.closing_period_end == date(2025, 12, 31)
 
     with organization_context(org.id):
         report = retained_earnings(as_of=date(2026, 1, 31))
