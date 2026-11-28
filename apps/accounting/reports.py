@@ -358,7 +358,10 @@ def cash_flow_statement(*, start_date, end_date):
     opening_date = start_date - timedelta(days=1)
     opening_balances = _account_balances_by_type(as_of=opening_date)
     closing_balances = _account_balances_by_type(as_of=end_date)
-    period_totals = _totals(start_date=start_date, end_date=end_date)
+    period_totals = _totals(
+        start_date=start_date, end_date=end_date,
+        exclude_year_end_closing=True,
+    )
 
     # Depreciation is the standard non-cash add-back. Other non-cash items
     # can be marked explicitly on their journal lines.
@@ -378,6 +381,7 @@ def cash_flow_statement(*, start_date, end_date):
         entry__entry_date__gte=start_date,
         entry__entry_date__lte=end_date,
         cash_flow_category=JournalLine.CashFlowCategory.NON_CASH_ADJUSTMENT,
+        entry__is_year_end_closing=False,
     ).exclude(account__account_type=Account.AccountType.DEPRECIATION_EXPENSE)
     other_non_cash = sum(
         (
@@ -433,6 +437,7 @@ def cash_flow_statement(*, start_date, end_date):
         status__in=COUNTED,
         entry_date__gte=start_date,
         entry_date__lte=end_date,
+        is_year_end_closing=False,
     ).prefetch_related("lines__account")
     for entry in entries:
         lines = list(entry.lines.all())
