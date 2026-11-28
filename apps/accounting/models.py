@@ -84,6 +84,18 @@ class Account(TenantModel):
         AccountType.OTHER_EXPENSE: Category.EXPENSE,
     }
 
+    CATEGORY_NORMAL_BALANCES = {
+        Category.ASSET: NormalBalance.DEBIT,
+        Category.LIABILITY: NormalBalance.CREDIT,
+        Category.EQUITY: NormalBalance.CREDIT,
+        Category.INCOME: NormalBalance.CREDIT,
+        Category.EXPENSE: NormalBalance.DEBIT,
+    }
+    ACCOUNT_TYPE_NORMAL_BALANCE_OVERRIDES = {
+        AccountType.ACCUMULATED_DEPRECIATION: NormalBalance.CREDIT,
+        AccountType.DRAWINGS: NormalBalance.DEBIT,
+    }
+
     code = models.CharField(max_length=20)
     name = models.CharField(max_length=150)
     category = models.CharField(max_length=20, choices=Category.choices)
@@ -120,6 +132,18 @@ class Account(TenantModel):
                 {"category": "The selected account type does not belong to this category."}
             )
 
+        expected_normal_balance = self.ACCOUNT_TYPE_NORMAL_BALANCE_OVERRIDES.get(
+            self.account_type,
+            self.CATEGORY_NORMAL_BALANCES.get(self.category),
+        )
+        if expected_normal_balance and self.normal_balance != expected_normal_balance:
+            raise ValidationError(
+                {"normal_balance": (
+                    f"Accounts of this type must have a "
+                    f"{expected_normal_balance} normal balance."
+                )}
+            )
+
         if self.parent_id:
             if self.parent_id == self.pk:
                 raise ValidationError({"parent": "An account cannot be its own parent."})
@@ -154,6 +178,18 @@ class Account(TenantModel):
                 ):
                     raise ValidationError(
                         "The structure of a system account cannot be changed."
+                    )
+
+            if existing and not existing.is_system and existing.journal_lines.exists():
+                locked_fields = (
+                    "code", "category", "account_type", "normal_balance", "parent_id",
+                )
+                if any(
+                    getattr(existing, field) != getattr(self, field)
+                    for field in locked_fields
+                ):
+                    raise ValidationError(
+                        "An account with journal entries can only be renamed or deactivated."
                     )
 
         self.full_clean()

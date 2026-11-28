@@ -251,7 +251,7 @@ class AccountBalancesView(APIView):
 
     def get(self, request):
         try:
-            as_of = _date(request.query_params.get("as_of") or date.today().isoformat(), "as_of")
+            as_of = _date(request.query_params.get("as_of") or timezone.localdate().isoformat(), "as_of")
         except ValidationError as exc:
             return _error(exc)
         totals = JournalLine.objects.filter(
