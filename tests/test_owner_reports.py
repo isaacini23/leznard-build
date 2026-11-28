@@ -27,10 +27,12 @@ def test_summary_and_rent_owed_follow_real_activity():
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert len(owed) == 1 and owed[0]["amount_due"] == "120000.00" and owed[0]["tenant"] == "Ada Tenant"
 
-    accounts = call(c, "get", "/api/v1/accounts/", org).json()
-    bank = next(account for account in accounts if account["code"] == "1010")
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+    with organization_context(org):
+        bank_id = str(Account.objects.get(code="1010").pk)
     call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {
-        "amount": "50000", "payment_date": "2027-02-03", "account": bank["id"]
+        "amount": "50000", "payment_date": "2027-02-03", "account": bank_id
     })
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert owed[0]["amount_due"] == "70000.00"
