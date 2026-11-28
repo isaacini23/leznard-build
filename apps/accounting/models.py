@@ -156,6 +156,13 @@ class Account(TenantModel):
                         "The structure of a system account cannot be changed."
                     )
 
+            if existing and not existing.is_system and self.journal_lines.exists():
+                locked = ("code", "category", "account_type", "normal_balance", "parent_id")
+                if any(getattr(existing, f) != getattr(self, f) for f in locked):
+                    raise ValidationError(
+                        "An account with journal entries can only be renamed or deactivated."
+                    )
+
         self.full_clean()
         super().save(*args, **kwargs)
 
