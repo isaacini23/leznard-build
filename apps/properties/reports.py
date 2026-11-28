@@ -144,11 +144,16 @@ def owner_statement(property_obj: Property, *, start_date, end_date):
         else:
             amount = _rounded(net * ownership.share_percent / Decimal("100"))
         allocated += amount
+        from .tenant_space import paid_to_owner
+
+        paid = paid_to_owner(property_obj, ownership.owner_id, start_date, end_date)
         shares.append({
             "owner_id": str(ownership.owner_id),
             "owner": ownership.owner.display_name,
             "share_percent": ownership.share_percent,
             "amount": _rounded(amount),
+            "paid": _rounded(paid),
+            "outstanding": _rounded(amount - paid),
         })
 
     return {

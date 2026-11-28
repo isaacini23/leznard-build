@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import maintenance_views, owner_reports, property_reports, property_views, rent_views, views
+from . import maintenance_views, tenant_space_views, owner_reports, property_reports, property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -69,6 +69,15 @@ urlpatterns = [
     path("tenancies/<uuid:tenancy_id>/rent-schedule/", rent_views.TenancyRentScheduleView.as_view()),
     path("tenancies/<uuid:tenancy_id>/rent-charges/", rent_views.TenancyRentChargesView.as_view()),
     path("rent-schedules/generate-due/", rent_views.RentGenerateDueView.as_view()),
+    path("rent-schedules/apply-late-fees/", tenant_space_views.ApplyLateFeesView.as_view()),
+    path("reports/rent-reminders/", tenant_space_views.RentRemindersView.as_view()),
+    path("properties/<uuid:property_id>/owner-payouts/", tenant_space_views.OwnerPayoutsView.as_view()),
+    path("contacts/<uuid:contact_id>/portal-invite/", tenant_space_views.PortalInviteView.as_view()),
+    path("portal/accept/", tenant_space_views.PortalAcceptView.as_view()),
+    path("portal/", tenant_space_views.PortalHomeView.as_view()),
+    path("portal/rent/", tenant_space_views.PortalRentView.as_view()),
+    path("portal/deposit/", tenant_space_views.PortalDepositView.as_view()),
+    path("portal/maintenance/", tenant_space_views.PortalMaintenanceView.as_view()),
     path("rent-schedules/<uuid:schedule_id>/generate/", rent_views.RentScheduleGenerateView.as_view()),
     path("rent-charges/<uuid:charge_id>/post/", rent_views.RentChargePostView.as_view()),
     path("rent-charges/<uuid:charge_id>/pay/", rent_views.RentChargePayView.as_view()),
