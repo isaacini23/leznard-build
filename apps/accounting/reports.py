@@ -472,10 +472,18 @@ def cash_flow_statement(*, start_date, end_date):
     ).prefetch_related("lines__account")
     for entry in entries:
         lines = list(entry.lines.all())
+        cash_lines = [
+            line for line in lines if line.account.account_type in cash_types
+        ]
+        # Non-cash journals (for example, depreciation against accumulated
+        # depreciation) affect profit and non-cash add-backs, but are not cash
+        # movements and must not be assigned to investing/financing flows.
+        if not cash_lines:
+            continue
         cash_delta = sum(
             (
                 line.base_debit_amount - line.base_credit_amount
-                for line in lines if line.account.account_type in cash_types
+                for line in cash_lines
             ),
             Decimal("0"),
         )
