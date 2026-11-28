@@ -45,3 +45,11 @@ Record rent receipts through the existing customer receipt endpoint. The contact
 Permissions: `properties.lease.view` to view schedules and rent charges; `properties.lease.manage` to configure schedules and generate draft invoices; `sales.invoice.post` to post rent invoices. Property officers with `properties.payment.record` may record only tenant receipts allocated to posted rent invoices; accountants or users with `payments.payment.post` post receipts. Users with `payments.payment.manage` retain the existing general payment workflow.
 
 Deposits/refunds, prorated final periods, automated recurring jobs/reminders, lease renewals, and property maintenance are not included in this phase.
+
+## One-step actions for owners
+
+No accounting knowledge is needed to bill and collect rent.
+
+- `POST /api/v1/rent-schedules/{id}/generate/` with `{"post": true}` generates the invoice and posts it to the ledger.
+- `POST /api/v1/rent-charges/{charge_id}/post/` posts a draft rent invoice (needs `properties.lease.manage`).
+- `POST /api/v1/rent-charges/{charge_id}/pay/` (needs `properties.payment.record`) records a tenant's rent payment end to end: it posts the invoice if still a draft, creates the receipt, allocates it and posts it. The `account` field is required and must identify an active bank or cash account belonging to the selected company. This prevents receipts being posted to an unintended account. `amount` is optional (defaults to everything still owed; part payments are allowed and overpayments are refused), as are `payment_date` (defaults to today), `method`, and `reference`. Returns the updated rent charge.
