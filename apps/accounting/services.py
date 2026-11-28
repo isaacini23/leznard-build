@@ -224,6 +224,8 @@ def post_journal_entry(entry, *, posted_by=None):
                 status=JournalEntry.Status.POSTED,
                 reversal_of__isnull=True,
             ).exclude(pk=locked.pk)
+            if locked.reversal_of_id:
+                active_close = active_close.exclude(pk=locked.reversal_of_id)
             if active_close.exists():
                 raise ValidationError(
                     {"closing_period_end": "This fiscal year already has an active closing journal."}
@@ -250,54 +252,88 @@ def post_journal_entry(entry, *, posted_by=None):
                     "and retained-earnings accounts."
                 )
 
-            prior_rows = JournalLine.unscoped.filter(
-                organization_id=locked.organization_id,
-                entry__status__in=(JournalEntry.Status.POSTED, JournalEntry.Status.REVERSED),
-                entry__entry_date__gte=fiscal_year_start,
-                entry__entry_date__lte=locked.closing_period_end,
-                entry__is_year_end_closing=False,
-                account__category__in=(Account.Category.INCOME, Account.Category.EXPENSE),
-            ).values("account_id").annotate(
-                debit=Sum("base_debit_amount"),
-                credit=Sum("base_credit_amount"),
-            )
-            expected_closures = {
-                row["account_id"]: (row["credit"] or Decimal("0")) - (row["debit"] or Decimal("0"))
-                for row in prior_rows
-                if (row["debit"] or Decimal("0")) != (row["credit"] or Decimal("0"))
-            }
-            actual_closures = {}
-            for line in profit_loss_lines:
-                actual_closures[line.account_id] = (
-                    actual_closures.get(line.account_id, Decimal("0"))
-                    + line.base_credit_amount - line.base_debit_amount
+            if locked.reversal_of_id:
+                original = JournalEntry.unscoped.get(pk=locked.reversal_of_id)
+                if (
+                    not original.is_year_end_closing
+                    or original.closing_period_end != locked.closing_period_end
+                ):
+                    raise ValidationError(
+                        "A closing reversal must reference a closing journal for the same fiscal year."
+                    )
+                original_totals = {}
+                for line in JournalLine.unscoped.filter(entry=original):
+                    original_totals[line.account_id] = (
+                        original_totals.get(line.account_id, Decimal("0"))
+                        + line.base_debit_amount - line.base_credit_amount
+                    )
+                reversal_totals = {}
+                for line in lines:
+                    reversal_totals[line.account_id] = (
+                        reversal_totals.get(line.account_id, Decimal("0"))
+                        + line.base_debit_amount - line.base_credit_amount
+                    )
+                expected_reversal = {
+                    account_id: -amount for account_id, amount in original_totals.items()
+                    if amount
+                }
+                actual_reversal = {
+                    account_id: amount for account_id, amount in reversal_totals.items()
+                    if amount
+                }
+                if actual_reversal != expected_reversal:
+                    raise ValidationError(
+                        "A closing reversal must exactly reverse the original closing journal."
+                    )
+            else:
+                prior_rows = JournalLine.unscoped.filter(
+                    organization_id=locked.organization_id,
+                    entry__status__in=(JournalEntry.Status.POSTED, JournalEntry.Status.REVERSED),
+                    entry__entry_date__gte=fiscal_year_start,
+                    entry__entry_date__lte=locked.closing_period_end,
+                    entry__is_year_end_closing=False,
+                    account__category__in=(Account.Category.INCOME, Account.Category.EXPENSE),
+                ).values("account_id").annotate(
+                    debit=Sum("base_debit_amount"),
+                    credit=Sum("base_credit_amount"),
                 )
-            expected_closures = {
-                account_id: amount for account_id, amount in expected_closures.items()
-                if amount
-            }
-            actual_closures = {
-                account_id: amount for account_id, amount in actual_closures.items()
-                if amount
-            }
-            if actual_closures != expected_closures:
-                raise ValidationError(
-                    "The closing journal must clear every income and expense account "
-                    "to its exact balance for the fiscal year being closed."
-                )
+                expected_closures = {
+                    row["account_id"]: (row["credit"] or Decimal("0")) - (row["debit"] or Decimal("0"))
+                    for row in prior_rows
+                    if (row["debit"] or Decimal("0")) != (row["credit"] or Decimal("0"))
+                }
+                actual_closures = {}
+                for line in profit_loss_lines:
+                    actual_closures[line.account_id] = (
+                        actual_closures.get(line.account_id, Decimal("0"))
+                        + line.base_credit_amount - line.base_debit_amount
+                    )
+                expected_closures = {
+                    account_id: amount for account_id, amount in expected_closures.items()
+                    if amount
+                }
+                actual_closures = {
+                    account_id: amount for account_id, amount in actual_closures.items()
+                    if amount
+                }
+                if actual_closures != expected_closures:
+                    raise ValidationError(
+                        "The closing journal must clear every income and expense account "
+                        "to its exact balance for the fiscal year being closed."
+                    )
 
-            retained_transfer = sum(
-                (line.base_debit_amount - line.base_credit_amount for line in retained_lines),
-                Decimal("0"),
-            )
-            required_transfer = sum(
-                (line.base_credit_amount - line.base_debit_amount for line in profit_loss_lines),
-                Decimal("0"),
-            )
-            if retained_transfer != required_transfer:
-                raise ValidationError(
-                    "The retained-earnings transfer must equal the fiscal year's actual net profit or loss."
+                retained_transfer = sum(
+                    (line.base_debit_amount - line.base_credit_amount for line in retained_lines),
+                    Decimal("0"),
                 )
+                required_transfer = sum(
+                    (line.base_credit_amount - line.base_debit_amount for line in profit_loss_lines),
+                    Decimal("0"),
+                )
+                if retained_transfer != required_transfer:
+                    raise ValidationError(
+                        "The retained-earnings transfer must equal the fiscal year's actual net profit or loss."
+                    )
 
         debit_total = sum((line.debit_amount for line in lines), Decimal("0"))
         credit_total = sum((line.credit_amount for line in lines), Decimal("0"))
