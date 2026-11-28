@@ -394,9 +394,12 @@ def renew_tenancy(
     if end_date and end_date < start_date:
         raise ValidationError({"end_date": "The end date cannot be before the start date."})
     old_schedule = RentSchedule.objects.select_for_update().filter(tenancy=old, is_active=True).first()
-    if old_schedule and old_schedule.next_invoice_date < start_date:
+    if old_schedule and old_schedule.next_invoice_date != start_date:
         raise ValidationError({
-            "start_date": "Invoice the rent periods before the renewal date first, so they are billed at the old rent."
+            "start_date": (
+                "The renewal date must match the next unbilled rent invoice date. "
+                "Generate earlier rent periods first; prorated transition periods are not supported."
+            )
         })
 
     old.status = Tenancy.Status.ENDED
