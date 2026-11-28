@@ -27,7 +27,11 @@ def test_summary_and_rent_owed_follow_real_activity():
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert len(owed) == 1 and owed[0]["amount_due"] == "120000.00" and owed[0]["tenant"] == "Ada Tenant"
 
-    call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"amount": "50000", "payment_date": "2027-02-03"})
+    accounts = call(c, "get", "/api/v1/accounts/", org).json()
+    bank = next(account for account in accounts if account["code"] == "1010")
+    call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {
+        "amount": "50000", "payment_date": "2027-02-03", "account": bank["id"]
+    })
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert owed[0]["amount_due"] == "70000.00"
 
