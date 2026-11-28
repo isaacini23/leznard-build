@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.test import Client
 
 from apps.accounting.models import Account
@@ -355,3 +356,100 @@ def test_reversal_after_report_period_does_not_rewrite_historical_cash_flow(org)
     assert march["net_change_in_cash"] == Decimal("1100.00")
     assert april["net_change_in_cash"] == Decimal("1000.00")
     assert april["reconciliation_difference"] == Decimal("0.00")
+
+
+
+def test_year_end_close_must_clear_actual_fiscal_year_balances(org):
+    post_lines(org, date(2025, 12, 10), [
+        {"account": "1100", "debit": "500.00"},
+        {"account": "4100", "credit": "500.00"},
+    ])
+    post_lines(org, date(2025, 12, 20), [
+        {"account": "6100", "debit": "100.00"},
+        {"account": "2000", "credit": "100.00"},
+    ])
+    with pytest.raises(ValidationError, match="must clear every income and expense"):
+        post_lines(org, date(2026, 1, 2), [
+            {"account": "4100", "debit": "450.00"},
+            {"account": "6100", "credit": "100.00"},
+            {"account": "3100", "credit": "350.00"},
+        ], is_year_end_closing=True, closing_period_end=date(2025, 12, 31))
+
+
+def test_duplicate_active_year_end_close_is_rejected(org):
+    post_lines(org, date(2025, 12, 10), [
+        {"account": "1100", "debit": "500.00"},
+        {"account": "4100", "credit": "500.00"},
+    ])
+    post_lines(org, date(2025, 12, 20), [
+        {"account": "6100", "debit": "100.00"},
+        {"account": "2000", "credit": "100.00"},
+    ])
+    close_lines = [
+        {"account": "4100", "debit": "500.00"},
+        {"account": "6100", "credit": "100.00"},
+        {"account": "3100", "credit": "400.00"},
+    ]
+    post_lines(
+        org, date(2026, 1, 2), close_lines,
+        is_year_end_closing=True, closing_period_end=date(2025, 12, 31),
+    )
+    with pytest.raises(ValidationError, match="already has an active closing"):
+        post_lines(
+            org, date(2026, 1, 4), close_lines,
+            is_year_end_closing=True, closing_period_end=date(2025, 12, 31),
+        )
+
+
+def test_explicit_investing_gain_is_removed_from_operating_profit(org):
+    post_lines(org, date(2026, 3, 20), [
+        {"account": "1010", "debit": "100.00"},
+        {"account": "1500", "credit": "80.00"},
+        {
+            "account": "4900", "credit": "20.00",
+            "cash_flow_category": "investing",
+        },
+    ])
+    with organization_context(org.id):
+        report = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
+        )
+    assert report["operating"]["net_profit"] == Decimal("320.00")
+    assert report["operating"]["other_operating_adjustment_total"] == Decimal("-20.00")
+    assert report["operating"]["total"] == Decimal("300.00")
+    assert report["investing"]["total"] == Decimal("-200.00")
+    assert report["reconciliation_difference"] == Decimal("0.00")
+
+
+def test_explicit_investing_working_capital_line_is_not_double_counted(org):
+    post_lines(org, date(2026, 3, 21), [
+        {"account": "1010", "debit": "100.00"},
+        {
+            "account": "1100", "credit": "100.00",
+            "cash_flow_category": "investing",
+        },
+    ])
+    with organization_context(org.id):
+        report = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
+        )
+    assert report["operating"]["working_capital_adjustment"] == Decimal("0.00")
+    assert report["investing"]["total"] == Decimal("-200.00")
+    assert report["reconciliation_difference"] == Decimal("0.00")
+
+
+def test_compound_zero_net_cash_journal_keeps_gross_investing_and_financing_rows(org):
+    post_lines(org, date(2026, 3, 22), [
+        {"account": "1010", "debit": "100.00"},
+        {"account": "1000", "credit": "100.00"},
+        {"account": "1500", "credit": "100.00"},
+        {"account": "2200", "debit": "100.00"},
+    ])
+    with organization_context(org.id):
+        report = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
+        )
+    assert report["investing"]["total"] == Decimal("-400.00")
+    assert report["financing"]["total"] == Decimal("900.00")
+    assert report["net_change_in_cash"] == Decimal("1000.00")
+    assert report["reconciliation_difference"] == Decimal("0.00")
