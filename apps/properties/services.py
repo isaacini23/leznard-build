@@ -325,3 +325,55 @@ def cancel_maintenance(request_id, *, reason=""):
     obj.resolution_notes = reason or obj.resolution_notes
     obj.save()
     return obj
+
+
+@transaction.atomic
+def bill_maintenance(request_id, *, bill_date=None, due_days=30, post=False, posted_by=None):
+    """Turn a completed job's actual cost into a purchase bill from the contractor, charged to
+    Repairs and maintenance and tagged to the property (so it shows in profitability)."""
+    from django.utils import timezone
+
+    from apps.contacts.models import ContactRole
+    from apps.sales.models import PurchaseBill, PurchaseBillLine
+    from apps.sales.services import post_purchase_bill
+
+    from .models import MaintenanceRequest
+
+    obj = _maintenance_for_update(request_id)
+    if obj.status != MaintenanceRequest.Status.COMPLETED:
+        raise ValidationError({"status": "Only a completed job can be billed."})
+    if obj.purchase_bill_id:
+        raise ValidationError({"purchase_bill": "This job has already been billed."})
+    if not obj.actual_cost or obj.actual_cost <= 0:
+        raise ValidationError({"actual_cost": "Record the actual cost before billing."})
+    if obj.assigned_to_id is None:
+        raise ValidationError({"assigned_to": "Assign a contractor or supplier before billing."})
+    if not ContactRole.objects.filter(contact=obj.assigned_to, role=ContactRole.Role.SUPPLIER).exists():
+        raise ValidationError({"assigned_to": "Give this contact the Supplier role so the bill can be paid."})
+    repairs = Account.objects.filter(
+        account_type=Account.AccountType.REPAIRS, is_active=True
+    ).order_by("code").first()
+    if repairs is None:
+        raise ValidationError({"account": "No active Repairs and maintenance account exists."})
+
+    organization = obj.organization
+    day = bill_date or timezone.localdate()
+    bill = PurchaseBill.objects.create(
+        supplier=obj.assigned_to,
+        property=obj.property,
+        number=f"MNT-{day:%Y%m}-{uuid.uuid4().hex[:8].upper()}",
+        document_date=day,
+        due_date=day + timedelta(days=due_days),
+        currency=organization.base_currency.upper(),
+        exchange_rate=1,
+        notes=f"Maintenance: {obj.title}",
+    )
+    PurchaseBillLine.objects.create(
+        bill=bill, description=f"{obj.title} ({obj.property.name})", quantity=1,
+        unit_price=obj.actual_cost, expense_account=repairs,
+    )
+    obj.purchase_bill = bill
+    obj.save()
+    if post:
+        post_purchase_bill(bill, posted_by=posted_by)
+    return obj

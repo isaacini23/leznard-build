@@ -545,6 +545,10 @@ class MaintenanceRequest(TenantModel):
     estimated_cost = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
     actual_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     resolution_notes = models.TextField(blank=True)
+    purchase_bill = models.OneToOneField(
+        "sales.PurchaseBill", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="maintenance_request",
+    )
 
     class Meta:
         ordering = ["-reported_date", "-created_at"]
