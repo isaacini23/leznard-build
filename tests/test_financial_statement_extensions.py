@@ -300,8 +300,10 @@ def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
 
     assert report["retained_earnings_ledger"] == Decimal("0.00")
     assert report["prior_unclosed_profit"] == Decimal("400.00")
-    assert report["current_year_profit"] == Decimal("300.00")
-    assert report["total_retained_earnings"] == Decimal("700.00")
+    # The fixture's 300.00 current-year profit is earned in February and March,
+    # after this report's 31 January 2026 cut-off.
+    assert report["current_year_profit"] == Decimal("0.00")
+    assert report["total_retained_earnings"] == Decimal("400.00")
 
 
 def test_comparative_reports_include_percentage_variance_and_zero_is_null(org):
