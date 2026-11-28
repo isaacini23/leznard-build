@@ -27,7 +27,8 @@ class RentScheduleSerializer(serializers.ModelSerializer):
         model = RentSchedule
         fields = (
             "id", "tenancy", "revenue_account", "next_invoice_date",
-            "billing_day", "due_days", "is_active", "created_at", "updated_at",
+            "billing_day", "due_days", "late_fee_percent", "late_fee_flat", "late_fee_grace_days",
+            "is_active", "created_at", "updated_at",
         )
         read_only_fields = ("id", "tenancy", "billing_day", "created_at", "updated_at")
 

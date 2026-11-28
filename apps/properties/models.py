@@ -423,6 +423,9 @@ class RentSchedule(TenantModel):
     billing_day = models.PositiveSmallIntegerField(null=True, blank=True)
     due_days = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    late_fee_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    late_fee_flat = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    late_fee_grace_days = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         ordering = ["next_invoice_date"]
@@ -470,6 +473,9 @@ class RentCharge(TenantModel):
     period_start = models.DateField()
     period_end = models.DateField()
     generated_at = models.DateTimeField(auto_now_add=True)
+    late_fee_invoice = models.OneToOneField(
+        "sales.SalesInvoice", on_delete=models.PROTECT, null=True, blank=True, related_name="late_fee_charge"
+    )
 
     class Meta:
         ordering = ["-period_start", "-created_at"]
@@ -642,3 +648,63 @@ class DepositTransaction(TenantModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Deposit movements cannot be deleted.")
+
+
+class OwnerPayout(TenantModel):
+    """Money actually paid to a property owner out of a period's owner statement."""
+
+    property = models.ForeignKey(Property, on_delete=models.PROTECT, related_name="owner_payouts")
+    owner = models.ForeignKey(Contact, on_delete=models.PROTECT, related_name="payouts_received")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    payout_date = models.DateField()
+    account = models.ForeignKey("accounting.Account", on_delete=models.PROTECT, related_name="+")
+    reference = models.CharField(max_length=100, blank=True)
+    journal_entry = models.OneToOneField(
+        "accounting.JournalEntry", on_delete=models.PROTECT, related_name="owner_payout"
+    )
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-payout_date", "-created_at"]
+        constraints = [models.CheckConstraint(condition=Q(amount__gt=0), name="owner_payout_positive")]
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            raise ValidationError("Payouts cannot be changed.")
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Payouts cannot be deleted.")
+
+
+class PortalInvitation(TenantModel):
+    """A one-time code a landlord gives a tenant so the tenant can open their own portal."""
+
+    contact = models.ForeignKey(Contact, on_delete=models.PROTECT, related_name="portal_invitations")
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+
+class TenantPortalAccess(models.Model):
+    """Lets one user see one tenant's own records in one company. Not company-scoped data:
+    it is always looked up by the signed-in user, never by company."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="portal_accesses")
+    organization = models.ForeignKey("organizations.Organization", on_delete=models.CASCADE, related_name="+")
+    contact = models.OneToOneField(Contact, on_delete=models.CASCADE, related_name="portal_access")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
