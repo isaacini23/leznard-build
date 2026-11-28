@@ -390,6 +390,10 @@ class Tenancy(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.rent_amount is not None and not self.rent_amount.is_finite():
+            raise ValidationError({"rent_amount": "Enter a finite amount."})
+        if self.deposit_amount is not None and not self.deposit_amount.is_finite():
+            raise ValidationError({"deposit_amount": "Enter a finite amount."})
         if self.rent_amount is not None and self.rent_amount < 0:
             raise ValidationError({"rent_amount": "Rent cannot be negative."})
         if self.deposit_amount is not None and self.deposit_amount < 0:
