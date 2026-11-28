@@ -141,8 +141,10 @@ class MaintenanceCompleteView(_Action):
         cost = request.data.get("actual_cost")
         try:
             cost = None if cost in (None, "") else Decimal(str(cost))
-        except InvalidOperation:
+        except (InvalidOperation, TypeError, ValueError):
             raise DjangoValidationError({"actual_cost": "Enter a valid amount."})
+        if cost is not None and not cost.is_finite():
+            raise DjangoValidationError({"actual_cost": "Enter a finite amount."})
         if cost is not None and cost < 0:
             raise DjangoValidationError({"actual_cost": "Cost cannot be negative."})
         return services.complete_maintenance(
