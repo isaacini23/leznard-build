@@ -55,3 +55,30 @@ def test_schedule_past_tenancy_end_is_skipped_not_fatal(capsys):
         Tenancy.objects.filter(pk=tenancy["id"]).update(end_date=date(2027, 3, 15))
         result = generate_due_rent_invoices(date(2027, 6, 1))
     assert result["generated"] == 1 and len(result["skipped"]) == 1
+
+
+def test_failed_post_is_rolled_back_and_not_counted_as_generated(monkeypatch):
+    from django.core.exceptions import ValidationError
+    from apps.core.tenancy import organization_context
+    from apps.properties import services
+    from apps.properties.models import RentCharge, RentSchedule
+
+    c, org = register()
+    tenancy, schedule_data = setup(c, org)
+    with organization_context(org):
+        schedule = RentSchedule.objects.get(pk=schedule_data["id"])
+        original_next_date = schedule.next_invoice_date
+
+    def fail_post(*args, **kwargs):
+        raise ValidationError("Posting failed")
+
+    monkeypatch.setattr(services, "post_rent_invoice", fail_post)
+    with organization_context(org):
+        result = services.generate_due_rent_invoices(date(2027, 1, 31), post=True)
+        schedule.refresh_from_db()
+        assert schedule.next_invoice_date == original_next_date
+        assert not RentCharge.objects.filter(tenancy_id=tenancy["id"]).exists()
+
+    assert result["generated"] == 0
+    assert result["posted"] == 0
+    assert len(result["skipped"]) == 1
