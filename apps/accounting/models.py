@@ -271,6 +271,15 @@ class JournalEntry(TenantModel):
 
 
 class JournalLine(TenantModel):
+    class CashFlowCategory(models.TextChoices):
+        OPERATING = "operating", "Operating"
+        INVESTING = "investing", "Investing"
+        FINANCING = "financing", "Financing"
+        NON_CASH_ADJUSTMENT = "non_cash_adjustment", "Non-cash adjustment"
+
+    cash_flow_category = models.CharField(
+        max_length=24, choices=CashFlowCategory.choices, blank=True, default=""
+    )
     entry = models.ForeignKey(
         JournalEntry, on_delete=models.PROTECT, related_name="lines"
     )
