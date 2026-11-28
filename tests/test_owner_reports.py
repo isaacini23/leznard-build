@@ -1,0 +1,97 @@
+from datetime import date
+
+import pytest
+
+from tests.test_properties import call, make_property, register, staff_client
+from tests.test_rent_management import active_tenancy, configure_schedule
+
+pytestmark = pytest.mark.django_db
+
+
+def test_empty_company_summary_is_all_zero():
+    c, org = register()
+    body = call(c, "get", "/api/v1/reports/owner-summary/", org).json()
+    assert body["units"]["total"] == 0 and body["units"]["occupancy_percent"] == "0.00"
+    assert body["rent"]["owed_now"] == "0.00" and body["money"]["net"] == "0.00"
+    assert call(c, "get", "/api/v1/reports/rent-owed/", org).json() == []
+
+
+def test_summary_and_rent_owed_follow_real_activity():
+    c, org = register()
+    _, unit, _, tenancy = active_tenancy(c, org)
+    # a second, vacant unit in the same property
+    call(c, "post", f"/api/v1/properties/{unit['property']}/units/", org, {"label": "B2", "unit_type": "flat"})
+    schedule = configure_schedule(c, org, tenancy, next_date="2027-01-31", due_days=5)
+    charge = call(c, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org, {"post": True}).json()
+
+    owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
+    assert len(owed) == 1 and owed[0]["amount_due"] == "120000.00" and owed[0]["tenant"] == "Ada Tenant"
+
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+    with organization_context(org):
+        bank_id = str(Account.objects.get(code="1010").pk)
+    call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {
+        "amount": "50000", "payment_date": "2027-02-03", "account": bank_id
+    })
+    owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
+    assert owed[0]["amount_due"] == "70000.00"
+
+    feb = call(c, "get", "/api/v1/reports/owner-summary/?month=2027-02", org).json()
+    assert feb["rent"]["collected_this_month"] == "50000.00"
+    assert feb["money"]["money_in"] == "50000.00" and feb["money"]["net"] == "50000.00"
+    assert feb["rent"]["owed_now"] == "70000.00"
+    jan = call(c, "get", "/api/v1/reports/owner-summary/?month=2027-01", org).json()
+    assert jan["rent"]["invoiced_this_month"] == "120000.00" and jan["rent"]["collected_this_month"] == "0.00"
+    assert jan["units"]["total"] == 2 and jan["units"]["occupied"] == 1 and jan["units"]["vacant"] == 1
+    assert jan["units"]["occupancy_percent"] == "50.00"
+    assert jan["money"]["customers_owe_you"] == "70000.00"
+    assert call(c, "get", "/api/v1/reports/rent-owed/?overdue=1", org).json() == []  # not due until Feb 2027
+
+    from apps.core.tenancy import organization_context
+    from apps.properties.owner_reports import owner_summary, rent_roll
+    with organization_context(org):
+        late = rent_roll(date(2027, 3, 1))
+        assert late[0]["status"] == "overdue" and late[0]["days_overdue"] == 24
+        assert owner_summary(2027, 3, date(2027, 3, 1))["rent"]["overdue_now"] == "70000.00"
+        assert owner_summary(2027, 3, date(2027, 3, 1))["rent"]["tenants_with_arrears"] == 1
+
+
+def test_validation_permissions_and_isolation():
+    c, org = register()
+    assert call(c, "get", "/api/v1/reports/owner-summary/?month=2027-13", org).status_code == 400
+    assert call(c, "get", "/api/v1/reports/owner-summary/?month=junk", org).status_code == 400
+    officer = staff_client(org, "Property officer", "po@example.com")
+    assert call(officer, "get", "/api/v1/reports/rent-owed/", org).status_code == 200
+    other, other_org = register("second@example.com", "Other Co")
+    _, _, _, tenancy = active_tenancy(other, other_org)
+    sch = configure_schedule(other, other_org, tenancy)
+    call(other, "post", f"/api/v1/rent-schedules/{sch['id']}/generate/", other_org, {"post": True})
+    assert call(c, "get", "/api/v1/reports/rent-owed/", org).json() == []
+    assert call(c, "get", "/api/v1/reports/owner-summary/?month=2027-01", org).json()["units"]["total"] == 0
+
+def test_rent_roll_reports_foreign_currency_due_in_company_base_currency():
+    c, org = register()
+    _, _, _, tenancy = active_tenancy(c, org)
+    schedule = configure_schedule(c, org, tenancy, next_date="2027-01-31")
+    charge = call(
+        c, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org, {"post": True}
+    ).json()
+
+    from apps.core.tenancy import organization_context
+    from apps.properties.models import RentCharge
+    from apps.properties.owner_reports import owner_summary, rent_roll
+    from apps.sales.models import SalesInvoice
+
+    with organization_context(org):
+        rent_charge = RentCharge.objects.get(pk=charge["id"])
+        # Simulate an invoice denominated in USD with NGN 1,500 per USD.
+        SalesInvoice.objects.filter(pk=rent_charge.invoice_id).update(
+            currency="USD", exchange_rate="1500"
+        )
+
+        rows = rent_roll(date(2027, 3, 1))
+        assert rows[0]["amount_due"] == "180000000.00"
+        summary = owner_summary(2027, 3, date(2027, 3, 1))
+        assert summary["rent"]["owed_now"] == "180000000.00"
+        assert summary["money"]["customers_owe_you"] == "180000000.00"
