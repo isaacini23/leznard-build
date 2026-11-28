@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import accounting_views, property_reports, property_views, rent_views, views
+from . import construction_views, accounting_views, property_reports, property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -71,6 +71,23 @@ urlpatterns = [
     path("rent-schedules/<uuid:schedule_id>/generate/", rent_views.RentScheduleGenerateView.as_view()),
     path("rent-charges/<uuid:charge_id>/post/", rent_views.RentChargePostView.as_view()),
     path("rent-charges/<uuid:charge_id>/pay/", rent_views.RentChargePayView.as_view()),
+    path("projects/", construction_views.ProjectListView.as_view()),
+    path("projects/<uuid:pk>/", construction_views.ProjectDetailView.as_view()),
+    path("projects/<uuid:pk>/summary/", construction_views.ProjectSummaryView.as_view()),
+    path("projects/<uuid:pk>/budget/", construction_views.BudgetLinesView.as_view()),
+    path("projects/<uuid:pk>/variations/", construction_views.VariationsView.as_view()),
+    path("projects/<uuid:pk>/costs/", construction_views.ProjectCostsView.as_view()),
+    path("projects/<uuid:pk>/invoices/", construction_views.ProjectInvoicesView.as_view()),
+    path("projects/<uuid:pk>/subcontracts/", construction_views.SubcontractsView.as_view()),
+    path("budget-lines/<uuid:pk>/", construction_views.BudgetLineDetailView.as_view()),
+    path("variations/<uuid:pk>/approve/", construction_views.VariationApproveView.as_view()),
+    path("variations/<uuid:pk>/reject/", construction_views.VariationRejectView.as_view()),
+    path("subcontracts/<uuid:pk>/", construction_views.SubcontractDetailView.as_view()),
+    path("subcontracts/<uuid:pk>/claims/", construction_views.ClaimsView.as_view()),
+    path("claims/<uuid:pk>/certify/", construction_views.ClaimCertifyView.as_view()),
+    path("claims/<uuid:pk>/cancel/", construction_views.ClaimCancelView.as_view()),
+    path("claims/<uuid:pk>/pay/", construction_views.ClaimPayView.as_view()),
+    path("claims/<uuid:pk>/release-retention/", construction_views.ClaimReleaseRetentionView.as_view()),
     path("", include("apps.contacts.urls")),
     path("", include("apps.sales.urls")),
     path("", include("apps.payments.urls")),
