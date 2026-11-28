@@ -24,12 +24,31 @@ MEDIA_ROOT = Path(os.environ.get("LEZNARD_MEDIA_ROOT", BASE_DIR / "media"))
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-rwnm+&1%*aa@*&nq=i1b1mwr4r&y_+r%*75ly)d3_x-i#h57j='
+# LEZNARD_ENV is "development" (the default, for your own machine) or "production".
+# Production refuses to start without its own secret key and database password,
+# and turns on the secure-cookie and HTTPS settings below.
+ENV = os.environ.get("LEZNARD_ENV", "development")
+IS_PRODUCTION = ENV == "production"
+
+_DEV_SECRET_KEY = "django-insecure-dev-only-never-use-in-production"
+SECRET_KEY = os.environ.get("LEZNARD_SECRET_KEY") or (None if IS_PRODUCTION else _DEV_SECRET_KEY)
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("Set LEZNARD_SECRET_KEY when LEZNARD_ENV=production.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = not IS_PRODUCTION
 
-ALLOWED_HOSTS = []
+# Comma-separated, for example: LEZNARD_ALLOWED_HOSTS=app.leznard.com,api.leznard.com
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("LEZNARD_ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+if IS_PRODUCTION:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -95,7 +114,11 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.environ.get("LEZNARD_DB_NAME", "leznard"),
         "USER": os.environ.get("LEZNARD_DB_USER", "leznard_app"),
-        "PASSWORD": os.environ.get("LEZNARD_DB_PASSWORD", "choose-another"),
+        "PASSWORD": (
+            os.environ["LEZNARD_DB_PASSWORD"]
+            if IS_PRODUCTION
+            else os.environ.get("LEZNARD_DB_PASSWORD", "")
+        ),
         "HOST": os.environ.get("LEZNARD_DB_HOST", "localhost"),
         "PORT": os.environ.get("LEZNARD_DB_PORT", "5432"),
     }
