@@ -148,6 +148,7 @@ def create_journal_entry(
                 entry=entry,
                 account=account,
                 description=item.get("description", ""),
+                cash_flow_category=item.get("cash_flow_category", ""),
                 debit_amount=debit,
                 credit_amount=credit,
                 base_debit_amount=base_debit,
@@ -225,6 +226,7 @@ def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by
             {
                 "account": line.account,
                 "description": line.description,
+                "cash_flow_category": line.cash_flow_category,
                 "debit": line.credit_amount,
                 "credit": line.debit_amount,
             }
