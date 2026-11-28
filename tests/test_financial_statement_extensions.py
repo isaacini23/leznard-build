@@ -272,8 +272,8 @@ def test_closing_journal_does_not_double_count_prior_unclosed_earnings(org):
     assert closing.is_year_end_closing is True
     assert report["retained_earnings_ledger"] == Decimal("400.00")
     assert report["prior_unclosed_profit"] == Decimal("0.00")
-    assert report["current_year_profit"] == Decimal("300.00")
-    assert report["total_retained_earnings"] == Decimal("700.00")
+    assert report["current_year_profit"] == Decimal("0.00")
+    assert report["total_retained_earnings"] == Decimal("400.00")
 
 
 def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
