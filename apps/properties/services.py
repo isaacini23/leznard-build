@@ -3,7 +3,7 @@ from datetime import timedelta
 import uuid
 
 from django.core.exceptions import ValidationError
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 
@@ -429,3 +429,180 @@ def renew_tenancy(
             due_days=old_schedule.due_days,
         )
     return new
+
+
+# ---- tenant deposits ------------------------------------------------------------
+
+DEPOSIT_ACCOUNT_CODE = "2300"
+
+
+@transaction.atomic
+def _deposit_liability_account():
+    account, _ = Account.objects.get_or_create(
+        code=DEPOSIT_ACCOUNT_CODE,
+        defaults={
+            "name": "Tenant Deposits Held",
+            "category": Account.Category.LIABILITY,
+            "account_type": Account.AccountType.OTHER_LIABILITY,
+            "normal_balance": Account.NormalBalance.CREDIT,
+            "is_system": True,
+        },
+    )
+    if (
+        account.category != Account.Category.LIABILITY
+        or account.account_type != Account.AccountType.OTHER_LIABILITY
+        or account.normal_balance != Account.NormalBalance.CREDIT
+        or not account.is_active
+    ):
+        raise ValidationError({
+            "deposit_account": (
+                "Account 2300 must be an active Other Liability account with a credit normal balance."
+            )
+        })
+    return account
+
+
+def _tenancy_chain(tenancy):
+    """The tenancy and the earlier tenancies it renewed: a deposit follows the tenant."""
+    chain = [tenancy.pk]
+    current = tenancy
+    while current.renewed_from_id:
+        chain.append(current.renewed_from_id)
+        current = Tenancy.objects.get(pk=current.renewed_from_id)
+    return chain
+
+
+def deposit_summary(tenancy):
+    from .models import DepositTransaction
+
+    rows = list(DepositTransaction.objects.filter(tenancy_id__in=_tenancy_chain(tenancy)))
+    total = lambda kind: sum((r.amount for r in rows if r.kind == kind), Decimal("0"))
+    received, deducted, refunded = total("received"), total("deduction"), total("refund")
+    return {
+        "agreed": tenancy.deposit_amount, "received": received, "deducted": deducted,
+        "refunded": refunded, "held": received - deducted - refunded, "transactions": rows,
+    }
+
+
+def _bank_or_cash(account_id):
+    if not account_id:
+        raise ValidationError({"account": "Select the bank or cash account that received or paid the deposit."})
+    account = Account.objects.filter(pk=account_id).first()
+    if account is None:
+        raise ValidationError({"account": "Account not found in this company."})
+    if not account.is_active:
+        raise ValidationError({"account": "Choose an active bank or cash account."})
+    if account.account_type not in (Account.AccountType.BANK, Account.AccountType.CASH):
+        raise ValidationError({"account": "Choose a bank or cash account."})
+    return account
+
+
+def _positive(amount, field="amount"):
+    try:
+        value = Decimal(str(amount))
+        if not value.is_finite():
+            raise InvalidOperation
+        rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({field: "Enter a valid amount with no more than two decimal places."})
+    if rounded != value:
+        raise ValidationError({field: "Use no more than two decimal places."})
+    if rounded <= 0:
+        raise ValidationError({field: "Enter an amount of at least 0.01."})
+    return rounded
+
+
+def _post_deposit_movement(tenancy, kind, amount, day, account, lines, description, reason, posted_by):
+    from django.utils import timezone
+
+    from apps.accounting.services import create_journal_entry, post_journal_entry
+
+    from .models import DepositTransaction
+
+    org = tenancy.organization
+    entry = create_journal_entry(
+        org, entry_date=day or timezone.localdate(), description=description,
+        reference=f"DEP-{str(tenancy.pk)[:8]}", lines=lines,
+    )
+    post_journal_entry(entry, posted_by=posted_by)
+    return DepositTransaction.objects.create(
+        tenancy=tenancy, kind=kind, amount=amount, transaction_date=entry.entry_date,
+        account=account, reason=reason[:300], journal_entry=entry, created_by=posted_by,
+    )
+
+
+def _locked_tenancy(tenancy_id):
+    tenancy = Tenancy.objects.select_for_update().select_related("unit__property", "tenant").filter(pk=tenancy_id).first()
+    if tenancy is None:
+        raise ValidationError({"tenancy": "Tenancy not found."})
+    return tenancy
+
+
+@transaction.atomic
+def receive_deposit(tenancy_id, *, amount=None, date=None, account_id=None, posted_by=None):
+    tenancy = _locked_tenancy(tenancy_id)
+    if tenancy.status == Tenancy.Status.ENDED:
+        raise ValidationError({"tenancy": "A deposit cannot be received for an ended tenancy."})
+    summary = deposit_summary(tenancy)
+    remaining_agreed = tenancy.deposit_amount - summary["received"]
+    if remaining_agreed <= 0:
+        raise ValidationError({"amount": "The agreed security deposit has already been received."})
+    if amount in (None, ""):
+        amount = remaining_agreed
+    amount = _positive(amount)
+    if amount > remaining_agreed:
+        raise ValidationError({"amount": f"The remaining agreed deposit is {remaining_agreed:.2f}."})
+    bank = _bank_or_cash(account_id)
+    liability = _deposit_liability_account()
+    return _post_deposit_movement(
+        tenancy, "received", amount, date, bank,
+        [{"account": bank, "debit": amount}, {"account": liability, "credit": amount}],
+        f"Deposit received: {tenancy.tenant.display_name}, {tenancy.unit.property.name} / {tenancy.unit.label}",
+        "", posted_by,
+    )
+
+
+@transaction.atomic
+def deduct_from_deposit(tenancy_id, *, amount, reason, date=None, income_account_id=None, posted_by=None):
+    tenancy = _locked_tenancy(tenancy_id)
+    if tenancy.status != Tenancy.Status.ENDED or Tenancy.objects.filter(renewed_from=tenancy).exists():
+        raise ValidationError({"tenancy": "Deductions are made when the tenancy has ended."})
+    amount = _positive(amount)
+    if not reason.strip():
+        raise ValidationError({"reason": "Say what the deduction is for."})
+    if amount > deposit_summary(tenancy)["held"]:
+        raise ValidationError({"amount": "That is more than the deposit still held."})
+    if income_account_id:
+        income = Account.objects.filter(pk=income_account_id, category=Account.Category.INCOME, is_active=True).first()
+    else:
+        income = Account.objects.filter(
+            account_type=Account.AccountType.OTHER_INCOME, is_active=True
+        ).order_by("code").first()
+    if income is None:
+        raise ValidationError({"income_account": "Choose an active income account."})
+    liability = _deposit_liability_account()
+    return _post_deposit_movement(
+        tenancy, "deduction", amount, date, income,
+        [{"account": liability, "debit": amount}, {"account": income, "credit": amount}],
+        f"Deposit kept: {reason[:100]}", reason, posted_by,
+    )
+
+
+@transaction.atomic
+def refund_deposit(tenancy_id, *, amount=None, date=None, account_id=None, posted_by=None):
+    tenancy = _locked_tenancy(tenancy_id)
+    if tenancy.status != Tenancy.Status.ENDED or Tenancy.objects.filter(renewed_from=tenancy).exists():
+        raise ValidationError({"tenancy": "A deposit is refunded when the tenancy has ended."})
+    held = deposit_summary(tenancy)["held"]
+    amount = held if amount in (None, "") else _positive(amount)
+    if amount <= 0:
+        raise ValidationError({"amount": "There is no deposit left to refund."})
+    if amount > held:
+        raise ValidationError({"amount": "That is more than the deposit still held."})
+    bank = _bank_or_cash(account_id)
+    liability = _deposit_liability_account()
+    return _post_deposit_movement(
+        tenancy, "refund", amount, date, bank,
+        [{"account": liability, "debit": amount}, {"account": bank, "credit": amount}],
+        f"Deposit refunded: {tenancy.tenant.display_name}", "", posted_by,
+    )
