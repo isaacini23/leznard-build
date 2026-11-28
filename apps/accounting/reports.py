@@ -220,37 +220,6 @@ def balance_sheet(*, as_of):
     }
 
 
-def comparative_income_statement(*, start_date, end_date, compare_start, compare_end):
-    current = income_statement(start_date=start_date, end_date=end_date)
-    comparison = income_statement(start_date=compare_start, end_date=compare_end)
-    metrics = (
-        "total_income", "total_cost_of_sales", "gross_profit",
-        "total_expenses", "net_profit",
-    )
-    variance = {
-        key: _money(current[key] - comparison[key]) for key in metrics
-    }
-    return {
-        "current": current,
-        "comparison": comparison,
-        "variance": variance,
-    }
-
-
-def comparative_balance_sheet(*, as_of, compare_as_of):
-    current = balance_sheet(as_of=as_of)
-    comparison = balance_sheet(as_of=compare_as_of)
-    metrics = ("total_assets", "total_liabilities", "total_equity")
-    variance = {
-        key: _money(current[key] - comparison[key]) for key in metrics
-    }
-    return {
-        "current": current,
-        "comparison": comparison,
-        "variance": variance,
-    }
-
-
 def _variance(current, comparison, metrics):
     amounts = {
         key: _money(current[key] - comparison[key])
@@ -534,9 +503,6 @@ def cash_flow_statement(*, start_date, end_date):
     unclassified = category_payload(categories["unclassified"])
     net_change = closing_cash - opening_cash
     classified_total = (
-        operating_total
-        + categories["investing"].copy().popitem()[1]
-        if False else
         operating_total
         + sum(categories["investing"].values(), Decimal("0"))
         + sum(categories["financing"].values(), Decimal("0"))
