@@ -68,8 +68,8 @@ No accounting knowledge is needed to bill and collect rent.
 Security deposits are held as a liability (account 2300 "Tenant Deposits Held", created on first use) and every movement is posted to the ledger. Movements are never edited or deleted.
 
 - `GET /api/v1/tenancies/{id}/deposit/` (`properties.lease.view`): agreed, received, deducted, refunded and held amounts, with the movements. After a renewal the deposit carries over to the new tenancy.
-- `POST .../deposit/receive/` `{amount?, date?, account?}`: money in (default: the agreed deposit not yet received; default bank or cash account).
+- `POST .../deposit/receive/` `{amount?, date?, account}`: money in (default amount: the agreed deposit not yet received). An explicit active bank or cash account is required; the service never guesses which account received the money. The received amount cannot exceed the agreed deposit.
 - `POST .../deposit/deduct/` `{amount, reason, date?, income_account?}`: keep part of the deposit for damages or arrears (ended tenancies only; recorded as other income).
-- `POST .../deposit/refund/` `{amount?, date?, account?}`: pay back (default: everything still held; ended tenancies only).
+- `POST .../deposit/refund/` `{amount?, date?, account}`: pay back (default: everything still held; ended tenancies only). An explicit active bank or cash account is required.
 
 Movements need `properties.payment.record`. You cannot deduct or refund more than is held.
