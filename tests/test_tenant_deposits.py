@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 
 from tests.test_owner_rent_actions import call
@@ -9,6 +11,11 @@ pytestmark = pytest.mark.django_db
 
 def make(client, org):
     _, _, _, tenancy = active_tenancy(client, org)
+    from apps.core.tenancy import organization_context
+    from apps.properties.models import Tenancy
+
+    with organization_context(org):
+        Tenancy.objects.filter(pk=tenancy["id"]).update(deposit_amount=Decimal("200000"))
     configure_schedule(client, org, tenancy)  # also creates the chart of accounts
     return tenancy
 
