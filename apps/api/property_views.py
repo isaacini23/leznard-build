@@ -17,6 +17,7 @@ from apps.contacts.models import Contact
 from apps.properties import services
 from apps.properties.models import (
     Building,
+    DepositTransaction,
     Property,
     PropertyDocument,
     PropertyManagement,
@@ -615,3 +616,79 @@ class TenancyRenewView(_TenancyAction):
         if error:
             return error
         return Response(TenancySerializer(new).data, status=status.HTTP_201_CREATED)
+
+
+# ---- deposits -------------------------------------------------------------------
+
+
+class DepositTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DepositTransaction
+        fields = ["id", "kind", "amount", "transaction_date", "reason"]
+
+
+def _deposit_payload(tenancy):
+    summary = services.deposit_summary(tenancy)
+    out = {k: str(v) for k, v in summary.items() if k != "transactions"}
+    out["transactions"] = DepositTransactionSerializer(summary["transactions"], many=True).data
+    return out
+
+
+class TenancyDepositView(_Base):
+    view_permission = "properties.lease.view"
+    manage_permission = "properties.lease.view"
+
+    def get(self, request, pk):
+        tenancy = Tenancy.objects.filter(pk=pk).first()
+        if tenancy is None:
+            return self.not_found()
+        return Response(_deposit_payload(tenancy))
+
+
+class _DepositAction(_Base):
+    view_permission = "properties.payment.record"
+    manage_permission = "properties.payment.record"
+
+    def parse_date(self, request):
+        raw = request.data.get("date")
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(str(raw))
+        except ValueError:
+            raise DjangoValidationError({"date": "Use a date like 2027-01-31."})
+
+    def post(self, request, pk):
+        tenancy = Tenancy.objects.filter(pk=pk).first()
+        if tenancy is None:
+            return self.not_found()
+        _, error = _guarded(lambda: self.run(request, pk))
+        if error:
+            return error
+        tenancy.refresh_from_db()
+        return Response(_deposit_payload(tenancy), status=status.HTTP_201_CREATED)
+
+
+class DepositReceiveView(_DepositAction):
+    def run(self, request, pk):
+        return services.receive_deposit(
+            pk, amount=request.data.get("amount"), date=self.parse_date(request),
+            account_id=request.data.get("account") or None, posted_by=request.user,
+        )
+
+
+class DepositDeductView(_DepositAction):
+    def run(self, request, pk):
+        return services.deduct_from_deposit(
+            pk, amount=request.data.get("amount"), reason=str(request.data.get("reason") or ""),
+            date=self.parse_date(request), income_account_id=request.data.get("income_account") or None,
+            posted_by=request.user,
+        )
+
+
+class DepositRefundView(_DepositAction):
+    def run(self, request, pk):
+        return services.refund_deposit(
+            pk, amount=request.data.get("amount"), date=self.parse_date(request),
+            account_id=request.data.get("account") or None, posted_by=request.user,
+        )
