@@ -119,7 +119,7 @@ def retained_earnings(*, as_of):
     accounts. A proper closing journal moves it into the retained-earnings
     account and therefore removes it from the unclosed-profit calculation.
     """
-    from datetime import date
+    from datetime import date, timedelta
 
     from apps.core.tenancy import get_current_org_id
     from apps.organizations.models import Organization
@@ -138,7 +138,7 @@ def retained_earnings(*, as_of):
     prior_profit = Decimal("0")
     if year_start > date.min:
         prior_profit = income_statement(
-            start_date=date.min, end_date=year_start - __import__("datetime").timedelta(days=1)
+            start_date=date.min, end_date=year_start - timedelta(days=1)
         )["net_profit"]
     current_profit = income_statement(
         start_date=year_start, end_date=as_of
@@ -190,12 +190,19 @@ def balance_sheet(*, as_of):
     # The retained-earnings ledger row is already included above. Add only
     # unclosed prior/current profit as additional equity components.
     unclosed = earnings["prior_unclosed_profit"] + earnings["current_year_profit"]
-    if unclosed:
+    if earnings["prior_unclosed_profit"]:
         equity.append({
             "code": None,
-            "name": "Unclosed prior and current earnings",
-            "account_type": "unclosed_earnings",
-            "amount": _money(unclosed),
+            "name": "Prior unclosed earnings",
+            "account_type": "prior_unclosed_earnings",
+            "amount": earnings["prior_unclosed_profit"],
+        })
+    if earnings["current_year_profit"]:
+        equity.append({
+            "code": None,
+            "name": "Current year earnings",
+            "account_type": "current_year_earnings",
+            "amount": earnings["current_year_profit"],
         })
     equity_total = equity_ledger_total + unclosed
     return {
@@ -252,6 +259,7 @@ def cash_flow_statement(*, start_date, end_date):
     than silently being reported as operating cash flow.
     """
     from collections import defaultdict
+    from datetime import timedelta
 
     from .models import JournalEntry
 
@@ -338,7 +346,7 @@ def cash_flow_statement(*, start_date, end_date):
                 group = "unclassified"
             categories[group][line.account.name] += amount
 
-    opening_totals = _totals(end_date=start_date - __import__("datetime").timedelta(days=1))
+    opening_totals = _totals(end_date=start_date - timedelta(days=1))
     closing_totals = _totals(end_date=end_date)
     cash_accounts = Account.objects.filter(account_type__in=cash_types)
     opening_cash = closing_cash = Decimal("0")
