@@ -150,6 +150,7 @@ def test_inviter_cannot_grant_more_access_than_they_have():
             name="Invite only", permissions=[
                 "access.user.invite",
                 "properties.property.view",
+                "properties.maintenance.view",
                 "contacts.contact.view",
             ]
         )
@@ -225,5 +226,6 @@ def test_permissions_follow_the_active_company_for_a_user_in_two_companies():
     assert "*" in in_b          # Administrator of their own company
     assert in_a == [
         "contacts.contact.view",
+        "properties.maintenance.view",
         "properties.property.view",
     ]  # Employee permissions in the other company

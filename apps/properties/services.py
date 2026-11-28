@@ -270,3 +270,58 @@ def generate_due_rent_invoices(today, *, post=False, posted_by=None):
                 })
                 break
     return {"generated": generated, "posted": posted, "skipped": skipped}
+
+
+# ---- maintenance ----------------------------------------------------------------
+
+
+def _maintenance_for_update(request_id):
+    from .models import MaintenanceRequest
+
+    obj = MaintenanceRequest.objects.select_for_update().filter(pk=request_id).first()
+    if obj is None:
+        raise ValidationError({"request": "Maintenance request not found."})
+    return obj
+
+
+@transaction.atomic
+def start_maintenance(request_id, *, scheduled_date=None):
+    from .models import MaintenanceRequest
+
+    obj = _maintenance_for_update(request_id)
+    if obj.status != MaintenanceRequest.Status.OPEN:
+        raise ValidationError({"status": "Only an open request can be started."})
+    obj.status = MaintenanceRequest.Status.IN_PROGRESS
+    if scheduled_date:
+        obj.scheduled_date = scheduled_date
+    obj.save()
+    return obj
+
+
+@transaction.atomic
+def complete_maintenance(request_id, *, completed_date, actual_cost=None, resolution_notes=""):
+    from .models import MaintenanceRequest
+
+    obj = _maintenance_for_update(request_id)
+    if obj.status not in (MaintenanceRequest.Status.OPEN, MaintenanceRequest.Status.IN_PROGRESS):
+        raise ValidationError({"status": "Only an open or in-progress request can be completed."})
+    obj.status = MaintenanceRequest.Status.COMPLETED
+    obj.completed_date = completed_date
+    if actual_cost is not None:
+        obj.actual_cost = actual_cost
+    obj.resolution_notes = resolution_notes or obj.resolution_notes
+    obj.save()
+    return obj
+
+
+@transaction.atomic
+def cancel_maintenance(request_id, *, reason=""):
+    from .models import MaintenanceRequest
+
+    obj = _maintenance_for_update(request_id)
+    if obj.status in (MaintenanceRequest.Status.COMPLETED, MaintenanceRequest.Status.CANCELLED):
+        raise ValidationError({"status": "A finished request cannot be cancelled."})
+    obj.status = MaintenanceRequest.Status.CANCELLED
+    obj.resolution_notes = reason or obj.resolution_notes
+    obj.save()
+    return obj
