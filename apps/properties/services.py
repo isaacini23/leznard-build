@@ -253,10 +253,13 @@ def generate_due_rent_invoices(today, *, post=False, posted_by=None):
             try:
                 with transaction.atomic():
                     charge = generate_next_rent_invoice(schedule.pk)
-                    generated += 1
                     if post:
                         post_rent_invoice(charge.pk, posted_by=posted_by)
-                        posted += 1
+                # Count only work that committed successfully. If posting raises,
+                # the enclosing transaction rolls the generated invoice back too.
+                generated += 1
+                if post:
+                    posted += 1
             except ValidationError as exc:
                 detail = getattr(exc, "message_dict", None) or exc.messages
                 skipped.append({
