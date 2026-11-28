@@ -210,6 +210,7 @@ class JournalEntry(TenantModel):
 
     entry_date = models.DateField()
     is_year_end_closing = models.BooleanField(default=False)
+    closing_period_end = models.DateField(null=True, blank=True)
     reference = models.CharField(max_length=50, blank=True)
     description = models.CharField(max_length=255)
     currency = models.CharField(max_length=3)
@@ -242,6 +243,14 @@ class JournalEntry(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.is_year_end_closing and not self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "Select the fiscal period end date being closed."
+            })
+        if not self.is_year_end_closing and self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "Only year-end closing journals may set this date."
+            })
         if self.currency:
             self.currency = self.currency.upper()
         if self.base_currency:
