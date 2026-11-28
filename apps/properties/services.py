@@ -502,6 +502,8 @@ def _positive(amount, field="amount"):
         rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError, ValueError):
         raise ValidationError({field: "Enter a valid amount with no more than two decimal places."})
+    if rounded != value:
+        raise ValidationError({field: "Use no more than two decimal places."})
     if rounded <= 0:
         raise ValidationError({field: "Enter an amount of at least 0.01."})
     return rounded
