@@ -51,6 +51,8 @@ def test_validation_rules():
     bad = call(c, "post", f"/api/v1/maintenance/{made['id']}/complete/", org, {"completed_date": "2000-01-01"})
     assert bad.status_code == 400  # before report date
     assert call(c, "post", f"/api/v1/maintenance/{made['id']}/complete/", org, {"actual_cost": "x"}).status_code == 400
+    assert call(c, "post", f"/api/v1/maintenance/{made['id']}/complete/", org, {"actual_cost": "NaN"}).status_code == 400
+    assert call(c, "post", f"/api/v1/maintenance/{made['id']}/complete/", org, {"actual_cost": "Infinity"}).status_code == 400
     cancelled = call(c, "post", f"/api/v1/maintenance/{made['id']}/cancel/", org, {"reason": "Duplicate"})
     assert cancelled.json()["status"] == "cancelled"
 
