@@ -207,17 +207,15 @@ def record_rent_payment(
     if amount > due:
         raise ValidationError({"amount": f"That is more than the {due:.2f} still owed."})
 
-    org_id = get_current_org_id()
-    if account_id:
-        account = Account.objects.filter(pk=account_id).first()
-        if account is None:
-            raise ValidationError({"account": "Account not found."})
-    else:
-        account = Account.objects.filter(
-            account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH), is_active=True
-        ).order_by("account_type", "code").first()
-        if account is None:
-            raise ValidationError({"account": "Add a bank or cash account first."})
+    if not account_id:
+        raise ValidationError({"account": "Select the bank or cash account receiving this rent payment."})
+    account = Account.objects.filter(
+        pk=account_id,
+        account_type__in=(Account.AccountType.BANK, Account.AccountType.CASH),
+        is_active=True,
+    ).first()
+    if account is None:
+        raise ValidationError({"account": "Select an active bank or cash account belonging to this company."})
 
     payment = Payment.objects.create(
         payment_type=Payment.Type.CUSTOMER_RECEIPT,
@@ -233,6 +231,8 @@ def record_rent_payment(
     PaymentAllocation.objects.create(payment=payment, sales_invoice=invoice, amount=amount)
     post_payment(payment, posted_by=posted_by)
     return RentCharge.objects.select_related("invoice").get(pk=charge_id)
+
+
 
 
 MAX_CATCH_UP_PERIODS = 24
@@ -253,10 +253,13 @@ def generate_due_rent_invoices(today, *, post=False, posted_by=None):
             try:
                 with transaction.atomic():
                     charge = generate_next_rent_invoice(schedule.pk)
-                    generated += 1
                     if post:
                         post_rent_invoice(charge.pk, posted_by=posted_by)
-                        posted += 1
+                # Count only work that committed successfully. If posting raises,
+                # the enclosing transaction rolls the generated invoice back too.
+                generated += 1
+                if post:
+                    posted += 1
             except ValidationError as exc:
                 detail = getattr(exc, "message_dict", None) or exc.messages
                 skipped.append({

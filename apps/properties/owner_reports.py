@@ -46,6 +46,9 @@ def rent_roll(today):
         due = charge.invoice.total - _paid("sales_invoice", charge.invoice)
         if due <= 0:
             continue
+        # Rent-roll figures are presented in the company's base currency, not
+        # the invoice's transaction currency.
+        due_in_base_currency = due * charge.invoice.exchange_rate
         overdue_days = max((today - charge.invoice.due_date).days, 0)
         rows.append({
             "charge_id": str(charge.pk),
@@ -56,7 +59,7 @@ def rent_roll(today):
             "period_start": charge.period_start.isoformat(),
             "period_end": charge.period_end.isoformat(),
             "due_date": charge.invoice.due_date.isoformat(),
-            "amount_due": _money(due),
+            "amount_due": _money(due_in_base_currency),
             "days_overdue": overdue_days,
             "status": "overdue" if overdue_days else "due",
         })

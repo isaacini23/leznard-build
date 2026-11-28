@@ -27,7 +27,13 @@ def test_summary_and_rent_owed_follow_real_activity():
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert len(owed) == 1 and owed[0]["amount_due"] == "120000.00" and owed[0]["tenant"] == "Ada Tenant"
 
-    call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"amount": "50000", "payment_date": "2027-02-03"})
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+    with organization_context(org):
+        bank_id = str(Account.objects.get(code="1010").pk)
+    call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {
+        "amount": "50000", "payment_date": "2027-02-03", "account": bank_id
+    })
     owed = call(c, "get", "/api/v1/reports/rent-owed/", org).json()
     assert owed[0]["amount_due"] == "70000.00"
 
@@ -63,3 +69,29 @@ def test_validation_permissions_and_isolation():
     call(other, "post", f"/api/v1/rent-schedules/{sch['id']}/generate/", other_org, {"post": True})
     assert call(c, "get", "/api/v1/reports/rent-owed/", org).json() == []
     assert call(c, "get", "/api/v1/reports/owner-summary/?month=2027-01", org).json()["units"]["total"] == 0
+
+def test_rent_roll_reports_foreign_currency_due_in_company_base_currency():
+    c, org = register()
+    _, _, _, tenancy = active_tenancy(c, org)
+    schedule = configure_schedule(c, org, tenancy, next_date="2027-01-31")
+    charge = call(
+        c, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org, {"post": True}
+    ).json()
+
+    from apps.core.tenancy import organization_context
+    from apps.properties.models import RentCharge
+    from apps.properties.owner_reports import owner_summary, rent_roll
+    from apps.sales.models import SalesInvoice
+
+    with organization_context(org):
+        rent_charge = RentCharge.objects.get(pk=charge["id"])
+        # Simulate an invoice denominated in USD with NGN 1,500 per USD.
+        SalesInvoice.objects.filter(pk=rent_charge.invoice_id).update(
+            currency="USD", exchange_rate="1500"
+        )
+
+        rows = rent_roll(date(2027, 3, 1))
+        assert rows[0]["amount_due"] == "180000000.00"
+        summary = owner_summary(2027, 3, date(2027, 3, 1))
+        assert summary["rent"]["owed_now"] == "180000000.00"
+        assert summary["money"]["customers_owe_you"] == "180000000.00"

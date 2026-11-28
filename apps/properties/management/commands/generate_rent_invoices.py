@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from apps.core.tenancy import organization_context
 from apps.organizations.models import Organization
@@ -15,7 +16,7 @@ class Command(BaseCommand):
         parser.add_argument("--date", help="Treat this date (YYYY-MM-DD) as today.")
 
     def handle(self, *args, **options):
-        today = date.fromisoformat(options["date"]) if options["date"] else date.today()
+        today = date.fromisoformat(options["date"]) if options["date"] else timezone.localdate()
         for organization in Organization.objects.all():
             with organization_context(organization.pk):
                 result = generate_due_rent_invoices(today, post=options["post"])
