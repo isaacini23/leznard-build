@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import owner_reports, property_reports, property_views, rent_views, views
+from . import maintenance_views, owner_reports, property_reports, property_views, rent_views, views
 
 urlpatterns = [
     path("me/", views.MeView.as_view()),
@@ -50,12 +50,18 @@ urlpatterns = [
     path("documents/<uuid:pk>/", property_views.DocumentDetailView.as_view()),
     path("documents/<uuid:pk>/download/", property_views.DocumentDownloadView.as_view()),
     path("contacts/<uuid:contact_id>/tenant-profile/", property_views.TenantProfileView.as_view()),
+    path("maintenance/", maintenance_views.MaintenanceListCreateView.as_view()),
+    path("maintenance/<uuid:pk>/", maintenance_views.MaintenanceDetailView.as_view()),
+    path("maintenance/<uuid:pk>/start/", maintenance_views.MaintenanceStartView.as_view()),
+    path("maintenance/<uuid:pk>/complete/", maintenance_views.MaintenanceCompleteView.as_view()),
+    path("maintenance/<uuid:pk>/cancel/", maintenance_views.MaintenanceCancelView.as_view()),
     path("tenancies/", property_views.TenancyListCreateView.as_view()),
     path("tenancies/<uuid:pk>/", property_views.TenancyDetailView.as_view()),
     path("tenancies/<uuid:pk>/activate/", property_views.TenancyActivateView.as_view()),
     path("tenancies/<uuid:pk>/end/", property_views.TenancyEndView.as_view()),
     path("tenancies/<uuid:tenancy_id>/rent-schedule/", rent_views.TenancyRentScheduleView.as_view()),
     path("tenancies/<uuid:tenancy_id>/rent-charges/", rent_views.TenancyRentChargesView.as_view()),
+    path("rent-schedules/generate-due/", rent_views.RentGenerateDueView.as_view()),
     path("rent-schedules/<uuid:schedule_id>/generate/", rent_views.RentScheduleGenerateView.as_view()),
     path("rent-charges/<uuid:charge_id>/post/", rent_views.RentChargePostView.as_view()),
     path("rent-charges/<uuid:charge_id>/pay/", rent_views.RentChargePayView.as_view()),

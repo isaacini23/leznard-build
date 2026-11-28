@@ -172,6 +172,18 @@ class RentScheduleGenerateView(_RentAPIView):
         return Response(RentChargeSerializer(charge).data, status=status.HTTP_201_CREATED)
 
 
+class RentGenerateDueView(_RentAPIView):
+    """Create every rent invoice that is now due (catching up missed months)."""
+
+    def post(self, request):
+        result = services.generate_due_rent_invoices(
+            timezone.localdate(),
+            post=request.data.get("post") in (True, "true", "1", 1),
+            posted_by=request.user,
+        )
+        return Response(result)
+
+
 class RentChargePostView(_RentAPIView):
     """Post a rent invoice to the ledger in one step."""
 

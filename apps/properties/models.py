@@ -497,3 +497,99 @@ class RentCharge(TenantModel):
     def __str__(self):
         return f"Rent {self.period_start} to {self.period_end}: {self.tenancy}"
 
+
+
+class MaintenanceRequest(TenantModel):
+    """A repair or upkeep job for a property or one unit. Kept forever; cancelled, never deleted."""
+
+    class Category(models.TextChoices):
+        PLUMBING = "plumbing", "Plumbing"
+        ELECTRICAL = "electrical", "Electrical"
+        STRUCTURAL = "structural", "Structural"
+        PAINTING = "painting", "Painting"
+        APPLIANCES = "appliances", "Appliances"
+        SECURITY = "security", "Security"
+        CLEANING = "cleaning", "Cleaning and grounds"
+        OTHER = "other", "Other"
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        NORMAL = "normal", "Normal"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_PROGRESS = "in_progress", "In progress"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    property = models.ForeignKey(Property, on_delete=models.PROTECT, related_name="maintenance_requests")
+    unit = models.ForeignKey(
+        Unit, on_delete=models.PROTECT, null=True, blank=True, related_name="maintenance_requests"
+    )
+    reported_by = models.ForeignKey(
+        Contact, on_delete=models.PROTECT, null=True, blank=True, related_name="reported_maintenance"
+    )
+    assigned_to = models.ForeignKey(
+        Contact, on_delete=models.PROTECT, null=True, blank=True, related_name="assigned_maintenance"
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.NORMAL)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    reported_date = models.DateField()
+    scheduled_date = models.DateField(null=True, blank=True)
+    completed_date = models.DateField(null=True, blank=True)
+    estimated_cost = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    actual_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-reported_date", "-created_at"]
+        constraints = [
+            models.CheckConstraint(condition=Q(estimated_cost__gte=0), name="maintenance_estimate_not_negative"),
+        ]
+        indexes = [models.Index(fields=["organization", "status"], name="maint_org_status_idx")]
+
+    def __str__(self):
+        return self.title
+
+    def clean(self):
+        super().clean()
+        if self.property_id:
+            _same_company(self, "property", self.property)
+        if self.unit_id:
+            _same_company(self, "unit", self.unit)
+            if self.property_id and self.unit.property_id != self.property_id:
+                raise ValidationError({"unit": "This unit is not part of the selected property."})
+        for field, roles, label in (
+            ("reported_by", None, None),
+            ("assigned_to", (ContactRole.Role.CONTRACTOR, ContactRole.Role.SUBCONTRACTOR, ContactRole.Role.SUPPLIER),
+             "a contractor, subcontractor or supplier"),
+        ):
+            contact = getattr(self, field)
+            if contact is None:
+                continue
+            _same_company(self, field, contact)
+            if roles and not ContactRole.unscoped.filter(
+                organization_id=self.organization_id, contact=contact, role__in=roles
+            ).exists():
+                raise ValidationError({field: f"This contact must be {label}."})
+        if self.estimated_cost is not None and not self.estimated_cost.is_finite():
+            raise ValidationError({"estimated_cost": "Enter a finite amount."})
+        if self.actual_cost is not None and not self.actual_cost.is_finite():
+            raise ValidationError({"actual_cost": "Enter a finite amount."})
+        if self.estimated_cost is not None and self.estimated_cost < 0:
+            raise ValidationError({"estimated_cost": "Cost cannot be negative."})
+        if self.actual_cost is not None and self.actual_cost < 0:
+            raise ValidationError({"actual_cost": "Cost cannot be negative."})
+        if self.completed_date and self.reported_date and self.completed_date < self.reported_date:
+            raise ValidationError({"completed_date": "Completion cannot be before the report date."})
+
+    def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
+        self.full_clean()
+        super().save(*args, **kwargs)
