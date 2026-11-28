@@ -77,6 +77,7 @@ DEFAULT_ROLES = [
             "accounting.journal.post",
             "accounting.journal.manage",
             "accounting.account.view",
+            "accounting.account.manage",
             "accounting.ledger.view",
             "accounting.period.close",
             "reports.report.view",
