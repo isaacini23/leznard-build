@@ -104,6 +104,7 @@ def create_journal_entry(
     reference="",
     reversal_of=None,
     is_year_end_closing=False,
+    closing_period_end=None,
 ):
     """Create a draft journal and its lines within the supplied organization."""
     base_currency = organization.base_currency.upper()
@@ -125,6 +126,7 @@ def create_journal_entry(
             entry_date=entry_date,
             reference=reference,
             is_year_end_closing=is_year_end_closing,
+            closing_period_end=closing_period_end,
             description=description,
             currency=currency,
             base_currency=base_currency,
@@ -244,6 +246,7 @@ def reverse_journal_entry(entry, *, entry_date=None, description=None, posted_by
             lines=reversal_lines,
             reversal_of=original,
             is_year_end_closing=original.is_year_end_closing,
+            closing_period_end=original.closing_period_end,
         )
         post_journal_entry(reversal, posted_by=posted_by)
         JournalEntry.unscoped.filter(pk=original.pk).update(
