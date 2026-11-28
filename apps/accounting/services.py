@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Sum
 
 from apps.core.tenancy import organization_context
 
@@ -209,6 +210,25 @@ def post_journal_entry(entry, *, posted_by=None):
                     {"closing_period_end": "The selected date is not the end of a fiscal year."}
                 )
 
+            fiscal_year = (
+                locked.closing_period_end.year
+                if locked.closing_period_end.month >= fiscal_start_month
+                else locked.closing_period_end.year - 1
+            )
+            fiscal_year_start = date(fiscal_year, fiscal_start_month, 1)
+
+            active_close = JournalEntry.unscoped.filter(
+                organization_id=locked.organization_id,
+                is_year_end_closing=True,
+                closing_period_end=locked.closing_period_end,
+                status=JournalEntry.Status.POSTED,
+                reversal_of__isnull=True,
+            ).exclude(pk=locked.pk)
+            if active_close.exists():
+                raise ValidationError(
+                    {"closing_period_end": "This fiscal year already has an active closing journal."}
+                )
+
             retained_lines = [
                 line for line in lines
                 if line.account.account_type == Account.AccountType.RETAINED_EARNINGS
@@ -228,6 +248,55 @@ def post_journal_entry(entry, *, posted_by=None):
                 raise ValidationError(
                     "A year-end closing journal may contain only income, expense "
                     "and retained-earnings accounts."
+                )
+
+            prior_rows = JournalLine.unscoped.filter(
+                organization_id=locked.organization_id,
+                entry__status__in=(JournalEntry.Status.POSTED, JournalEntry.Status.REVERSED),
+                entry__entry_date__gte=fiscal_year_start,
+                entry__entry_date__lte=locked.closing_period_end,
+                entry__is_year_end_closing=False,
+                account__category__in=(Account.Category.INCOME, Account.Category.EXPENSE),
+            ).values("account_id").annotate(
+                debit=Sum("base_debit_amount"),
+                credit=Sum("base_credit_amount"),
+            )
+            expected_closures = {
+                row["account_id"]: (row["credit"] or Decimal("0")) - (row["debit"] or Decimal("0"))
+                for row in prior_rows
+                if (row["debit"] or Decimal("0")) != (row["credit"] or Decimal("0"))
+            }
+            actual_closures = {}
+            for line in profit_loss_lines:
+                actual_closures[line.account_id] = (
+                    actual_closures.get(line.account_id, Decimal("0"))
+                    + line.base_credit_amount - line.base_debit_amount
+                )
+            expected_closures = {
+                account_id: amount for account_id, amount in expected_closures.items()
+                if amount
+            }
+            actual_closures = {
+                account_id: amount for account_id, amount in actual_closures.items()
+                if amount
+            }
+            if actual_closures != expected_closures:
+                raise ValidationError(
+                    "The closing journal must clear every income and expense account "
+                    "to its exact balance for the fiscal year being closed."
+                )
+
+            retained_transfer = sum(
+                (line.base_debit_amount - line.base_credit_amount for line in retained_lines),
+                Decimal("0"),
+            )
+            required_transfer = sum(
+                (line.base_credit_amount - line.base_debit_amount for line in profit_loss_lines),
+                Decimal("0"),
+            )
+            if retained_transfer != required_transfer:
+                raise ValidationError(
+                    "The retained-earnings transfer must equal the fiscal year's actual net profit or loss."
                 )
 
         debit_total = sum((line.debit_amount for line in lines), Decimal("0"))
