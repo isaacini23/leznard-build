@@ -298,7 +298,7 @@ def post_journal_entry(entry, *, posted_by=None):
                     credit=Sum("base_credit_amount"),
                 )
                 expected_closures = {
-                    row["account_id"]: (row["credit"] or Decimal("0")) - (row["debit"] or Decimal("0"))
+                    row["account_id"]: (row["debit"] or Decimal("0")) - (row["credit"] or Decimal("0"))
                     for row in prior_rows
                     if (row["debit"] or Decimal("0")) != (row["credit"] or Decimal("0"))
                 }
