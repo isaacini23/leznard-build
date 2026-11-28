@@ -255,7 +255,7 @@ def test_closing_journal_does_not_double_count_prior_unclosed_earnings(org):
         {"account": Account.objects.get(organization=org, code="4100"), "debit": "500.00"},
         {"account": Account.objects.get(organization=org, code="6100"), "credit": "100.00"},
         {"account": Account.objects.get(organization=org, code="3100"), "credit": "400.00"},
-    ], is_year_end_closing=True)
+    ], is_year_end_closing=True, closing_period_end=date(2025, 12, 31))
 
     with organization_context(org.id):
         report = retained_earnings(as_of=date(2026, 1, 31))
