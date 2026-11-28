@@ -583,7 +583,10 @@ class TenancyEndView(_TenancyAction):
         except ValueError:
             return Response({"error": {"details": {"end_date": ["Use a date like 2026-12-31."]}}}, status=400)
         reason = str(request.data.get("reason", ""))
-        tenancy, error = _guarded(lambda: services.end_tenancy(pk, end_date=end_date, reason=reason))
+        tenancy, error = _guarded(lambda: services.end_tenancy(
+            pk, end_date=end_date, reason=reason,
+            bill_final_rent=request.data.get("bill_final_rent") not in (False, "false", "0", 0),
+        ))
         if error:
             return error
         return Response(TenancySerializer(tenancy).data)

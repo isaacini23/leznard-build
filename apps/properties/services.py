@@ -39,8 +39,43 @@ def activate_tenancy(tenancy_id):
     return tenancy
 
 
+MAX_FINAL_PERIODS = 60
+
+
+def _bill_final_rent(tenancy, end_date):
+    """Invoice every rent period up to the end date; the last, part-used period is charged
+    pro rata by days. Returns the number of invoices created."""
+    schedule = RentSchedule.objects.select_for_update().select_related(
+        "revenue_account", "organization"
+    ).filter(tenancy=tenancy, is_active=True).first()
+    if schedule is None:
+        return 0
+    months = _FREQUENCY_MONTHS[tenancy.rent_frequency]
+    created = 0
+    for _ in range(MAX_FINAL_PERIODS):
+        period_start = schedule.next_invoice_date
+        if period_start > end_date:
+            break
+        next_start = _add_billing_months(period_start, months, schedule.billing_day or period_start.day)
+        if next_start - timedelta(days=1) <= end_date:
+            generate_next_rent_invoice(schedule.pk)
+            schedule.refresh_from_db()
+        else:
+            used = (end_date - period_start).days + 1
+            whole = (next_start - period_start).days
+            amount = (tenancy.rent_amount * used / whole).quantize(Decimal("0.01"))
+            if amount > 0:
+                _make_rent_charge(schedule, tenancy, period_start, end_date, amount)
+            schedule.next_invoice_date = end_date + timedelta(days=1)
+            schedule.save(update_fields=["next_invoice_date", "updated_at"])
+        created += 1
+        if schedule.next_invoice_date > end_date:
+            break
+    return created
+
+
 @transaction.atomic
-def end_tenancy(tenancy_id, *, end_date, reason=""):
+def end_tenancy(tenancy_id, *, end_date, reason="", bill_final_rent=True):
     """End an active tenancy: the unit becomes vacant again. The record is kept."""
     tenancy = Tenancy.objects.select_for_update().filter(pk=tenancy_id).first()
     if tenancy is None:
@@ -49,6 +84,8 @@ def end_tenancy(tenancy_id, *, end_date, reason=""):
         raise ValidationError({"tenancy": "Only an active tenancy can be ended."})
     if end_date < tenancy.start_date:
         raise ValidationError({"end_date": "The end date cannot be before the start date."})
+    if bill_final_rent:
+        _bill_final_rent(tenancy, end_date)
     tenancy.status = Tenancy.Status.ENDED
     tenancy.end_date = end_date
     tenancy.end_reason = reason[:300]
@@ -76,6 +113,33 @@ def _add_billing_months(value, months, billing_day):
     day = min(billing_day, monthrange(year, month)[1])
     from datetime import date
     return date(year, month, day)
+
+
+def _make_rent_charge(schedule, tenancy, period_start, period_end, amount):
+    """Create the draft invoice, its single line and the RentCharge for one rent period."""
+    number = f"RENT-{period_start:%Y%m}-{uuid.uuid4().hex[:8].upper()}"
+    invoice = SalesInvoice.objects.create(
+        customer=tenancy.tenant,
+        tenancy=tenancy,
+        number=number,
+        document_date=period_start,
+        due_date=period_start + timedelta(days=schedule.due_days),
+        currency=schedule.organization.base_currency.upper(),
+        exchange_rate=1,
+        notes=f"Rent for {tenancy.unit.property.name} / {tenancy.unit.label}, "
+              f"{period_start.isoformat()} to {period_end.isoformat()}",
+    )
+    SalesInvoiceLine.objects.create(
+        invoice=invoice,
+        description=f"Rent: {tenancy.unit.property.name} / {tenancy.unit.label} "
+                    f"({period_start.isoformat()} to {period_end.isoformat()})",
+        quantity=1,
+        unit_price=amount,
+        revenue_account=schedule.revenue_account,
+    )
+    return RentCharge.objects.create(
+        tenancy=tenancy, invoice=invoice, period_start=period_start, period_end=period_end,
+    )
 
 
 @transaction.atomic
@@ -113,32 +177,7 @@ def generate_next_rent_invoice(schedule_id):
         if schedule.revenue_account.category != Account.Category.INCOME or not schedule.revenue_account.is_active:
             raise ValidationError({"revenue_account": "Choose an active income account."})
 
-        number = f"RENT-{period_start:%Y%m}-{uuid.uuid4().hex[:8].upper()}"
-        invoice = SalesInvoice.objects.create(
-            customer=tenancy.tenant,
-            tenancy=tenancy,
-            number=number,
-            document_date=period_start,
-            due_date=period_start + timedelta(days=schedule.due_days),
-            currency=schedule.organization.base_currency.upper(),
-            exchange_rate=1,
-            notes=f"Rent for {tenancy.unit.property.name} / {tenancy.unit.label}, "
-                  f"{period_start.isoformat()} to {period_end.isoformat()}",
-        )
-        SalesInvoiceLine.objects.create(
-            invoice=invoice,
-            description=f"Rent: {tenancy.unit.property.name} / {tenancy.unit.label} "
-                        f"({period_start.isoformat()} to {period_end.isoformat()})",
-            quantity=1,
-            unit_price=tenancy.rent_amount,
-            revenue_account=schedule.revenue_account,
-        )
-        charge = RentCharge.objects.create(
-            tenancy=tenancy,
-            invoice=invoice,
-            period_start=period_start,
-            period_end=period_end,
-        )
+        charge = _make_rent_charge(schedule, tenancy, period_start, period_end, tenancy.rent_amount)
         schedule.next_invoice_date = next_start
         schedule.save(update_fields=["next_invoice_date", "updated_at"])
         return charge
