@@ -150,24 +150,38 @@ def retained_earnings(*, as_of):
     # begins. Track those transfers explicitly so the prior profit is removed
     # from "unclosed" earnings exactly once. Reversals retain the flag and net
     # the transfer back out.
-    closing_transfer = JournalLine.objects.filter(
+    closing_lines = JournalLine.objects.filter(
         entry__status__in=COUNTED,
         entry__is_year_end_closing=True,
         entry__entry_date__lte=as_of,
+        entry__closing_period_end__lte=as_of,
         account__account_type=Account.AccountType.RETAINED_EARNINGS,
-    ).aggregate(
-        debit=Sum("base_debit_amount"),
-        credit=Sum("base_credit_amount"),
     )
-    closing_transfer_amount = (
-        (closing_transfer["credit"] or Decimal("0"))
-        - (closing_transfer["debit"] or Decimal("0"))
+
+    def closing_transfer_for_period(queryset):
+        amounts = queryset.aggregate(
+            debit=Sum("base_debit_amount"),
+            credit=Sum("base_credit_amount"),
+        )
+        return (
+            (amounts["credit"] or Decimal("0"))
+            - (amounts["debit"] or Decimal("0"))
+        )
+
+    prior_closing_transfer = closing_transfer_for_period(
+        closing_lines.filter(entry__closing_period_end__lt=year_start)
     )
-    prior_profit -= closing_transfer_amount
+    current_closing_transfer = closing_transfer_for_period(
+        closing_lines.filter(
+            entry__closing_period_end__gte=year_start,
+            entry__closing_period_end__lte=as_of,
+        )
+    )
+    prior_profit -= prior_closing_transfer
 
     current_profit = income_statement(
         start_date=year_start, end_date=as_of
-    )["net_profit"]
+    )["net_profit"] - current_closing_transfer
     return {
         "as_of": as_of,
         "fiscal_year_start": year_start,
