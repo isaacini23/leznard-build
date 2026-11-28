@@ -346,7 +346,6 @@ def cash_flow_statement(*, start_date, end_date):
     }
     investing_types = {
         Account.AccountType.FIXED_ASSET,
-        Account.AccountType.ACCUMULATED_DEPRECIATION,
     }
     financing_types = {
         Account.AccountType.LOAN_PAYABLE,
@@ -434,9 +433,7 @@ def cash_flow_statement(*, start_date, end_date):
     net_profit = income_statement(
         start_date=start_date, end_date=end_date
     )["net_profit"]
-    operating_total = (
-        net_profit + explicit_pl_reclass + non_cash_total + working_capital_adjustment
-    )
+    operating_total = net_profit + non_cash_total + working_capital_adjustment
     operating_adjustments = defaultdict(Decimal)
     if explicit_pl_reclass:
         operating_adjustments["Investing/financing gains and losses reclassified"] += explicit_pl_reclass
