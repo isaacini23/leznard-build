@@ -18,8 +18,11 @@ def deposit(client, org, tid):
 
 
 def bank_account_id(client, org):
-    accounts = call(client, "get", "/api/v1/accounts/", org).json()
-    return next(account["id"] for account in accounts if account["code"] == "1010")
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+
+    with organization_context(org):
+        return str(Account.objects.get(code="1010").pk)
 
 
 def test_deposit_lifecycle_posts_to_ledger():
