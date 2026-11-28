@@ -7,3 +7,7 @@ Plain-language reports for business owners. Amounts are in the company's base cu
   - `rent`: invoiced_this_month, collected_this_month, owed_now, overdue_now, tenants_with_arrears
   - `money`: money_in and money_out (posted receipts/payments in the month), net, customers_owe_you, you_owe_suppliers
 - `GET /api/v1/reports/rent-owed/` (needs `properties.lease.view`; add `?overdue=1` for late rent only): each unpaid rent invoice with tenant, property, unit, due date, amount due and days overdue, oldest first.
+
+## Owner statement
+
+`GET /api/v1/properties/{id}/owner-statement/?start=2027-01-01&end=2027-01-31` (`properties.profitability.view`) shows what the property's owners are owed for the period: rent actually collected, less the manager's fee (the management record's percentage of rent collected) and the repair and running costs billed to the property in the period, split between current owners by share. The last owner takes any rounding remainder. A negative net means costs exceeded income; carry it forward rather than paying out.
