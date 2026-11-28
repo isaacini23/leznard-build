@@ -1,4 +1,6 @@
 """Owner-facing summary reports."""
+from datetime import date
+
 from django.utils import timezone
 
 from rest_framework.exceptions import ValidationError
