@@ -61,7 +61,7 @@ No accounting knowledge is needed to bill and collect rent.
 
 ## Renewals and rent changes
 
-`POST /api/v1/tenancies/{id}/renew/` (`properties.lease.manage`) with `{start_date, end_date?, rent_amount?, rent_frequency?, deposit_amount?, notes?}` renews an active tenancy on new terms, for example a rent increase. The old tenancy ends the day before `start_date` (reason "Renewed"), a new active tenancy begins for the same tenant and unit (which stays occupied, linked through `renewed_from`), and rent billing carries on from the next invoice date at the new rent. Rent periods before the start date must already be invoiced, so they are billed at the old rent.
+`POST /api/v1/tenancies/{id}/renew/` (`properties.lease.manage`) with `{start_date, end_date?, rent_amount?, rent_frequency?, deposit_amount?, notes?}` renews an active tenancy on new terms, for example a rent increase. The old tenancy ends the day before `start_date` (reason "Renewed"), a new active tenancy begins for the same tenant and unit (which stays occupied, linked through `renewed_from`), and rent billing carries on from the next invoice date at the new rent. When a rent schedule exists, `start_date` must exactly match its next unbilled invoice date. Generate earlier periods first; mid-period renewals are refused because prorated transition periods are not supported.
 
 ## Tenant deposits
 
