@@ -1,5 +1,7 @@
 """Tenant-scoped chart of accounts, journals and general-ledger API views."""
 from datetime import date
+
+from django.utils import timezone
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -209,7 +211,7 @@ class GeneralLedgerView(APIView):
         account = get_object_or_404(Account.objects, pk=account_id)
         try:
             start = _date(request.query_params.get("start"), "start") if request.query_params.get("start") else None
-            end = _date(request.query_params.get("end"), "end") if request.query_params.get("end") else date.today()
+            end = _date(request.query_params.get("end"), "end") if request.query_params.get("end") else timezone.localdate()
             if start and end < start:
                 raise ValidationError({"end": "The end date cannot be before the start date."})
         except ValidationError as exc:
