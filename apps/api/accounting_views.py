@@ -57,6 +57,7 @@ def _journal_payload(entry):
         "id": str(entry.pk), "entry_date": entry.entry_date,
         "reference": entry.reference,
         "is_year_end_closing": entry.is_year_end_closing,
+        "closing_period_end": entry.closing_period_end,
         "description": entry.description,
         "currency": entry.currency, "base_currency": entry.base_currency,
         "exchange_rate": str(entry.exchange_rate), "status": entry.status,
@@ -169,6 +170,8 @@ class JournalListCreateView(APIView):
                 reference=data.get("reference", ""), currency=data.get("currency"),
                 exchange_rate=data.get("exchange_rate"), lines=lines,
                 is_year_end_closing=data.get("is_year_end_closing", False),
+                closing_period_end=_date(data.get("closing_period_end"), "closing_period_end")
+                if data.get("closing_period_end") else None,
             )
         except (ValidationError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ValidationError):
