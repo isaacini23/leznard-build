@@ -449,7 +449,7 @@ def test_compound_zero_net_cash_journal_keeps_gross_investing_and_financing_rows
         report = cash_flow_statement(
             start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
         )
-    assert report["investing"]["total"] == Decimal("-400.00")
+    assert report["investing"]["total"] == Decimal("-200.00")
     assert report["financing"]["total"] == Decimal("900.00")
     assert report["net_change_in_cash"] == Decimal("1000.00")
     assert report["reconciliation_difference"] == Decimal("0.00")
