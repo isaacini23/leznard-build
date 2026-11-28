@@ -413,17 +413,25 @@ def cash_flow_statement(*, start_date, end_date):
         start_date=start_date, end_date=end_date
     )["net_profit"]
     operating_total = net_profit + non_cash_total + working_capital_adjustment
-    operating = {
-        "net_profit": _money(net_profit),
-        "non_cash_adjustments": {
-            "total": _money(non_cash_total),
-            "depreciation": _money(depreciation),
-            "other": _money(other_non_cash),
-        },
-        "working_capital_changes": working_capital_rows,
-        "working_capital_adjustment": _money(working_capital_adjustment),
-        "total": _money(operating_total),
+    operating_adjustments = defaultdict(Decimal)
+    operating_account_types = current_asset_types | current_liability_types
+    known_profit_loss_types = {
+        Account.AccountType.SALES_REVENUE,
+        Account.AccountType.SERVICE_REVENUE,
+        Account.AccountType.OTHER_INCOME,
+        Account.AccountType.COST_OF_SALES,
+        Account.AccountType.SALARIES,
+        Account.AccountType.RENT,
+        Account.AccountType.UTILITIES,
+        Account.AccountType.TRANSPORT,
+        Account.AccountType.OFFICE_SUPPLIES,
+        Account.AccountType.BANK_CHARGES,
+        Account.AccountType.DEPRECIATION_EXPENSE,
+        Account.AccountType.REPAIRS,
+        Account.AccountType.TAX_EXPENSE,
+        Account.AccountType.OTHER_EXPENSE,
     }
+    operating = {}
 
     # Investing/financing movements are classified at counterpart-line level.
     # This supports a single journal containing several different purposes.
@@ -453,70 +461,66 @@ def cash_flow_statement(*, start_date, end_date):
         counterpart_lines = [
             line for line in lines if line.account.account_type not in cash_types
         ]
-        total_weight = sum(
-            (
-                line.base_debit_amount + line.base_credit_amount
-                for line in counterpart_lines
-            ),
-            Decimal("0"),
-        )
-        if not counterpart_lines or not total_weight:
+        if not counterpart_lines:
             categories["unclassified"]["Unclassified cash movement"] += cash_delta
             continue
 
-        allocated = Decimal("0")
-        for index, line in enumerate(counterpart_lines):
-            weight = line.base_debit_amount + line.base_credit_amount
-            amount = (
-                cash_delta - allocated
-                if index == len(counterpart_lines) - 1
-                else cash_delta * weight / total_weight
-            )
-            allocated += amount
+        for line in counterpart_lines:
+            # On a balanced journal, each counterpart line's signed amount
+            # (credit minus debit) is its exact contribution to net cash change.
+            # This handles mixed inflows/outflows without allocating a net total
+            # proportionally across unrelated lines.
+            amount = line.base_credit_amount - line.base_debit_amount
+            if not amount:
+                continue
 
             explicit = line.cash_flow_category
+            account_type = line.account.account_type
             if explicit == JournalLine.CashFlowCategory.INVESTING:
                 group = "investing"
             elif explicit == JournalLine.CashFlowCategory.FINANCING:
                 group = "financing"
-            elif explicit in (
-                JournalLine.CashFlowCategory.OPERATING,
-                JournalLine.CashFlowCategory.NON_CASH_ADJUSTMENT,
-            ):
-                # Operating activities are already represented by the indirect
-                # calculation above; non-cash adjustments do not create cash.
+            elif explicit == JournalLine.CashFlowCategory.OPERATING:
+                if (
+                    account_type not in operating_account_types
+                    and account_type not in known_profit_loss_types
+                ):
+                    operating_adjustments[line.account.name] += amount
                 continue
-            elif line.account.account_type in investing_types:
+            elif explicit == JournalLine.CashFlowCategory.NON_CASH_ADJUSTMENT:
+                # Non-cash adjustments belong in the add-back section, not
+                # investing/financing cash flows.
+                continue
+            elif account_type in investing_types:
                 group = "investing"
-            elif line.account.account_type in financing_types:
+            elif account_type in financing_types:
                 group = "financing"
-            elif line.account.account_type in {
-                Account.AccountType.ACCOUNTS_RECEIVABLE,
-                Account.AccountType.INVENTORY,
-                Account.AccountType.PREPAID_EXPENSE,
-                Account.AccountType.ACCOUNTS_PAYABLE,
-                Account.AccountType.VAT_PAYABLE,
-                Account.AccountType.PAYE_PAYABLE,
-                Account.AccountType.WITHHOLDING_TAX_PAYABLE,
-                Account.AccountType.SALES_REVENUE,
-                Account.AccountType.SERVICE_REVENUE,
-                Account.AccountType.OTHER_INCOME,
-                Account.AccountType.COST_OF_SALES,
-                Account.AccountType.SALARIES,
-                Account.AccountType.RENT,
-                Account.AccountType.UTILITIES,
-                Account.AccountType.TRANSPORT,
-                Account.AccountType.OFFICE_SUPPLIES,
-                Account.AccountType.BANK_CHARGES,
-                Account.AccountType.DEPRECIATION_EXPENSE,
-                Account.AccountType.REPAIRS,
-                Account.AccountType.TAX_EXPENSE,
-                Account.AccountType.OTHER_EXPENSE,
-            }:
+            elif account_type in operating_account_types or account_type in known_profit_loss_types:
                 continue
             else:
                 group = "unclassified"
             categories[group][line.account.name] += amount
+
+    operating_adjustment_total = sum(
+        operating_adjustments.values(), Decimal("0")
+    )
+    operating_total += operating_adjustment_total
+    operating = {
+        "net_profit": _money(net_profit),
+        "non_cash_adjustments": {
+            "total": _money(non_cash_total),
+            "depreciation": _money(depreciation),
+            "other": _money(other_non_cash),
+        },
+        "working_capital_changes": working_capital_rows,
+        "working_capital_adjustment": _money(working_capital_adjustment),
+        "other_operating_adjustments": [
+            {"name": name, "amount": _money(amount)}
+            for name, amount in sorted(operating_adjustments.items()) if amount
+        ],
+        "other_operating_adjustment_total": _money(operating_adjustment_total),
+        "total": _money(operating_total),
+    }
 
     def category_payload(rows):
         total = sum(rows.values(), Decimal("0"))
