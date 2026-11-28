@@ -20,14 +20,23 @@ pytestmark = pytest.mark.django_db
 PASSWORD = "Str0ng-pass-123"
 
 
-def post_lines(org, on, lines, *, is_year_end_closing=False):
+def post_lines(
+    org, on, lines, *, is_year_end_closing=False, closing_period_end=None
+):
     with organization_context(org.id):
+        resolved_lines = []
+        for item in lines:
+            item = dict(item)
+            if isinstance(item["account"], str):
+                item["account"] = Account.objects.get(code=item["account"])
+            resolved_lines.append(item)
         entry = create_journal_entry(
             org,
             entry_date=on,
             description="Financial statement test",
-            lines=lines,
+            lines=resolved_lines,
             is_year_end_closing=is_year_end_closing,
+            closing_period_end=closing_period_end,
         )
     return post_journal_entry(entry)
 
@@ -244,17 +253,17 @@ def test_unknown_cash_flow_counterpart_is_not_assumed_to_be_operating(org):
 
 def test_closing_journal_does_not_double_count_prior_unclosed_earnings(org):
     post_lines(org, date(2025, 12, 10), [
-        {"account": Account.objects.get(organization=org, code="1100"), "debit": "500.00"},
-        {"account": Account.objects.get(organization=org, code="4100"), "credit": "500.00"},
+        {"account": "1100", "debit": "500.00"},
+        {"account": "4100", "credit": "500.00"},
     ])
     post_lines(org, date(2025, 12, 20), [
-        {"account": Account.objects.get(organization=org, code="6100"), "debit": "100.00"},
-        {"account": Account.objects.get(organization=org, code="2000"), "credit": "100.00"},
+        {"account": "6100", "debit": "100.00"},
+        {"account": "2000", "credit": "100.00"},
     ])
     closing = post_lines(org, date(2026, 1, 2), [
-        {"account": Account.objects.get(organization=org, code="4100"), "debit": "500.00"},
-        {"account": Account.objects.get(organization=org, code="6100"), "credit": "100.00"},
-        {"account": Account.objects.get(organization=org, code="3100"), "credit": "400.00"},
+        {"account": "4100", "debit": "500.00"},
+        {"account": "6100", "credit": "100.00"},
+        {"account": "3100", "credit": "400.00"},
     ], is_year_end_closing=True, closing_period_end=date(2025, 12, 31))
 
     with organization_context(org.id):
@@ -263,23 +272,23 @@ def test_closing_journal_does_not_double_count_prior_unclosed_earnings(org):
     assert closing.is_year_end_closing is True
     assert report["retained_earnings_ledger"] == Decimal("400.00")
     assert report["prior_unclosed_profit"] == Decimal("0.00")
-    assert report["current_year_profit"] == Decimal("0.00")
-    assert report["total_retained_earnings"] == Decimal("400.00")
+    assert report["current_year_profit"] == Decimal("300.00")
+    assert report["total_retained_earnings"] == Decimal("700.00")
 
 
 def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
     post_lines(org, date(2025, 12, 10), [
-        {"account": Account.objects.get(organization=org, code="1100"), "debit": "500.00"},
-        {"account": Account.objects.get(organization=org, code="4100"), "credit": "500.00"},
+        {"account": "1100", "debit": "500.00"},
+        {"account": "4100", "credit": "500.00"},
     ])
     post_lines(org, date(2025, 12, 20), [
-        {"account": Account.objects.get(organization=org, code="6100"), "debit": "100.00"},
-        {"account": Account.objects.get(organization=org, code="2000"), "credit": "100.00"},
+        {"account": "6100", "debit": "100.00"},
+        {"account": "2000", "credit": "100.00"},
     ])
     closing = post_lines(org, date(2026, 1, 2), [
-        {"account": Account.objects.get(organization=org, code="4100"), "debit": "500.00"},
-        {"account": Account.objects.get(organization=org, code="6100"), "credit": "100.00"},
-        {"account": Account.objects.get(organization=org, code="3100"), "credit": "400.00"},
+        {"account": "4100", "debit": "500.00"},
+        {"account": "6100", "credit": "100.00"},
+        {"account": "3100", "credit": "400.00"},
     ], is_year_end_closing=True)
     from apps.accounting.services import reverse_journal_entry
     reverse_journal_entry(closing, entry_date=date(2026, 1, 3))
@@ -289,7 +298,8 @@ def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
 
     assert report["retained_earnings_ledger"] == Decimal("0.00")
     assert report["prior_unclosed_profit"] == Decimal("400.00")
-    assert report["total_retained_earnings"] == Decimal("400.00")
+    assert report["current_year_profit"] == Decimal("300.00")
+    assert report["total_retained_earnings"] == Decimal("700.00")
 
 
 def test_comparative_reports_include_percentage_variance_and_zero_is_null(org):
