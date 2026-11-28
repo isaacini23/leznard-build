@@ -56,3 +56,24 @@ def test_renewal_permissions_and_isolation():
     assert call(auditor, "post", url, org, {"start_date": "2027-02-15"}).status_code == 403
     other, other_org = register("second@example.com", "Other Co")
     assert call(other, "post", url, other_org, {"start_date": "2027-02-15"}).status_code == 400
+
+def test_renewal_cannot_start_midway_through_an_unbilled_rent_period():
+    c, org = register()
+    _, _, _, tenancy = active_tenancy(c, org)
+    schedule = configure_schedule(c, org, tenancy, next_date="2027-01-31")
+    first = call(c, "post", f"/api/v1/rent-schedules/{schedule['id']}/generate/", org, {})
+    assert first.status_code == 201
+
+    # The next unbilled period starts on 28 February. A 15 February renewal
+    # would leave the first half of that period billed at the old rent.
+    url = f"/api/v1/tenancies/{tenancy['id']}/renew/"
+    mismatch = call(c, "post", url, org, {
+        "start_date": "2027-02-15", "rent_amount": "150000"
+    })
+    assert mismatch.status_code == 400
+    assert call(c, "get", f"/api/v1/tenancies/{tenancy['id']}/", org).json()["status"] == "active"
+
+    aligned = call(c, "post", url, org, {
+        "start_date": "2027-02-28", "rent_amount": "150000"
+    })
+    assert aligned.status_code == 201, aligned.content
