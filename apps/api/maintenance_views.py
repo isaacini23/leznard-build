@@ -31,9 +31,9 @@ class MaintenanceSerializer(serializers.ModelSerializer):
             "id", "property", "property_name", "unit", "unit_label", "reported_by",
             "assigned_to", "assigned_to_name", "title", "description", "category", "priority",
             "status", "reported_date", "scheduled_date", "completed_date",
-            "estimated_cost", "actual_cost", "resolution_notes",
+            "estimated_cost", "actual_cost", "resolution_notes", "purchase_bill",
         ]
-        read_only_fields = ["id", "status", "completed_date", "actual_cost", "resolution_notes"]
+        read_only_fields = ["id", "status", "completed_date", "actual_cost", "resolution_notes", "purchase_bill"]
         extra_kwargs = {"reported_date": {"required": False}}
 
     def __init__(self, *args, **kwargs):
@@ -141,10 +141,8 @@ class MaintenanceCompleteView(_Action):
         cost = request.data.get("actual_cost")
         try:
             cost = None if cost in (None, "") else Decimal(str(cost))
-        except (InvalidOperation, TypeError, ValueError):
+        except InvalidOperation:
             raise DjangoValidationError({"actual_cost": "Enter a valid amount."})
-        if cost is not None and not cost.is_finite():
-            raise DjangoValidationError({"actual_cost": "Enter a finite amount."})
         if cost is not None and cost < 0:
             raise DjangoValidationError({"actual_cost": "Cost cannot be negative."})
         return services.complete_maintenance(
@@ -158,3 +156,18 @@ class MaintenanceCompleteView(_Action):
 class MaintenanceCancelView(_Action):
     def run(self, request, pk):
         return services.cancel_maintenance(pk, reason=str(request.data.get("reason") or ""))
+
+
+class MaintenanceBillView(_Action):
+    """Bill a completed job: creates the contractor's purchase bill (optionally posted)."""
+
+    def run(self, request, pk):
+        from apps.access.services import has_permission
+        from apps.core.tenancy import get_current_org_id
+
+        post = request.data.get("post") in (True, "true", "1", 1)
+        if post and not has_permission(request.user, "purchases.bill.post", organization_id=get_current_org_id()):
+            raise DjangoValidationError({"post": "You do not have permission to post bills; leave it as a draft."})
+        return services.bill_maintenance(
+            pk, bill_date=_date(request.data.get("bill_date"), "bill_date"), post=post, posted_by=request.user,
+        )
