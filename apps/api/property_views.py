@@ -628,8 +628,14 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
 
 
 def _deposit_payload(tenancy):
+    from decimal import Decimal
+
     summary = services.deposit_summary(tenancy)
-    out = {k: str(v) for k, v in summary.items() if k != "transactions"}
+    out = {
+        key: format(Decimal(value).quantize(Decimal("0.01")), "f")
+        for key, value in summary.items()
+        if key != "transactions"
+    }
     out["transactions"] = DepositTransactionSerializer(summary["transactions"], many=True).data
     return out
 
