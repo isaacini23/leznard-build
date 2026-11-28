@@ -73,3 +73,7 @@ Security deposits are held as a liability (account 2300 "Tenant Deposits Held", 
 - `POST .../deposit/refund/` `{amount?, date?, account}`: pay back (default: everything still held; ended tenancies only). An explicit active bank or cash account is required.
 
 Movements need `properties.payment.record`. You cannot deduct or refund more than is held.
+
+## Final month on move-out
+
+Ending a tenancy (`POST /api/v1/tenancies/{id}/end/`) now also bills the rent up to the end date: any full periods not yet invoiced, then the last part-used period pro rata by days (for example 10 of 31 days of one month's rent). The invoices are created as drafts. Send `"bill_final_rent": false` to end the tenancy without billing.
