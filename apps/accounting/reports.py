@@ -581,14 +581,26 @@ def comparative_cash_flow_statement(
         start_date=compare_start, end_date=compare_end
     )
     metrics = (
-        "opening_cash_and_bank", "net_change_in_cash",
-        "closing_cash_and_bank",
+        "opening_cash_and_bank", "operating", "investing", "financing",
+        "unclassified", "net_change_in_cash", "closing_cash_and_bank",
     )
     current_values = {
-        key: current[key] for key in metrics
+        "opening_cash_and_bank": current["opening_cash_and_bank"],
+        "operating": current["operating"]["total"],
+        "investing": current["investing"]["total"],
+        "financing": current["financing"]["total"],
+        "unclassified": current["unclassified"]["total"],
+        "net_change_in_cash": current["net_change_in_cash"],
+        "closing_cash_and_bank": current["closing_cash_and_bank"],
     }
     comparison_values = {
-        key: comparison[key] for key in metrics
+        "opening_cash_and_bank": comparison["opening_cash_and_bank"],
+        "operating": comparison["operating"]["total"],
+        "investing": comparison["investing"]["total"],
+        "financing": comparison["financing"]["total"],
+        "unclassified": comparison["unclassified"]["total"],
+        "net_change_in_cash": comparison["net_change_in_cash"],
+        "closing_cash_and_bank": comparison["closing_cash_and_bank"],
     }
     variance, variance_percent = _variance(
         current_values, comparison_values, metrics
