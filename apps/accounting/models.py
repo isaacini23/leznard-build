@@ -251,6 +251,10 @@ class JournalEntry(TenantModel):
             raise ValidationError({
                 "closing_period_end": "Only year-end closing journals may set this date."
             })
+        if self.closing_period_end and self.entry_date < self.closing_period_end:
+            raise ValidationError({
+                "closing_period_end": "A closing journal cannot be dated before the period it closes."
+            })
         if self.currency:
             self.currency = self.currency.upper()
         if self.base_currency:
