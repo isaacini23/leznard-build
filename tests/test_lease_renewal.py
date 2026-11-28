@@ -45,6 +45,8 @@ def test_renewal_refused_when_earlier_periods_are_unbilled_and_for_bad_input():
     assert call(c, "post", url, org, {"start_date": "nope"}).status_code == 400
     assert call(c, "post", url, org, {"start_date": "2027-02-15", "end_date": "2027-01-01"}).status_code == 400
     assert call(c, "post", url, org, {"start_date": "2027-02-15", "rent_amount": "abc"}).status_code == 400
+    assert call(c, "post", url, org, {"start_date": "2027-02-15", "rent_amount": "NaN"}).status_code == 400
+    assert call(c, "post", url, org, {"start_date": "2027-02-15", "deposit_amount": "Infinity"}).status_code == 400
     assert call(c, "post", url, org, {"start_date": "2027-02-15", "rent_frequency": "weekly"}).status_code == 400
 
 
