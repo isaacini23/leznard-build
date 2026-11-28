@@ -56,6 +56,7 @@ urlpatterns = [
     path("tenancies/<uuid:pk>/end/", property_views.TenancyEndView.as_view()),
     path("tenancies/<uuid:tenancy_id>/rent-schedule/", rent_views.TenancyRentScheduleView.as_view()),
     path("tenancies/<uuid:tenancy_id>/rent-charges/", rent_views.TenancyRentChargesView.as_view()),
+    path("rent-schedules/generate-due/", rent_views.RentGenerateDueView.as_view()),
     path("rent-schedules/<uuid:schedule_id>/generate/", rent_views.RentScheduleGenerateView.as_view()),
     path("rent-charges/<uuid:charge_id>/post/", rent_views.RentChargePostView.as_view()),
     path("rent-charges/<uuid:charge_id>/pay/", rent_views.RentChargePayView.as_view()),
