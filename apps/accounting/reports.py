@@ -251,40 +251,90 @@ def comparative_balance_sheet(*, as_of, compare_as_of):
     }
 
 
-def cash_flow_statement(*, start_date, end_date):
-    """Classify posted cash/bank movements using their journal counterpart accounts.
+def _variance(current, comparison, metrics):
+    amounts = {
+        key: _money(current[key] - comparison[key])
+        for key in metrics
+    }
+    percentages = {}
+    for key in metrics:
+        prior = comparison[key]
+        percentages[key] = (
+            None if prior == 0
+            else _money((current[key] - prior) / abs(prior) * Decimal("100"))
+        )
+    return amounts, percentages
 
-    Account-type mapping is deliberately explicit. Transactions whose
-    counterpart cannot be classified are returned as unclassified rather
-    than silently being reported as operating cash flow.
+
+def comparative_income_statement(*, start_date, end_date, compare_start, compare_end):
+    current = income_statement(start_date=start_date, end_date=end_date)
+    comparison = income_statement(start_date=compare_start, end_date=compare_end)
+    metrics = (
+        "total_income", "total_cost_of_sales", "gross_profit",
+        "total_expenses", "net_profit",
+    )
+    variance, variance_percent = _variance(current, comparison, metrics)
+    return {
+        "current": current,
+        "comparison": comparison,
+        "variance": variance,
+        "variance_percent": variance_percent,
+    }
+
+
+def comparative_balance_sheet(*, as_of, compare_as_of):
+    current = balance_sheet(as_of=as_of)
+    comparison = balance_sheet(as_of=compare_as_of)
+    metrics = ("total_assets", "total_liabilities", "total_equity")
+    variance, variance_percent = _variance(current, comparison, metrics)
+    return {
+        "current": current,
+        "comparison": comparison,
+        "variance": variance,
+        "variance_percent": variance_percent,
+    }
+
+
+def _account_balances_by_type(*, as_of):
+    totals = _totals(end_date=as_of)
+    accounts = Account.objects.filter(id__in=totals.keys())
+    balances = {}
+    for account in accounts:
+        debit, credit = totals[account.id]
+        # Use debit-positive balances for assets and credit-positive for liabilities.
+        if account.category == Account.Category.LIABILITY:
+            amount = credit - debit
+        else:
+            amount = debit - credit
+        balances[account.account_type] = balances.get(
+            account.account_type, Decimal("0")
+        ) + amount
+    return balances
+
+
+def cash_flow_statement(*, start_date, end_date):
+    """Prepare an indirect-method cash flow statement in base currency.
+
+    Operating cash flow starts with net profit, adds back non-cash expenses,
+    and adjusts for movements in operating working-capital accounts. Investing
+    and financing cash movements use explicit journal-line classifications
+    where supplied, with conservative account-type fallbacks. Unknown flows
+    remain visible as unclassified.
     """
     from collections import defaultdict
     from datetime import timedelta
 
-    from .models import JournalEntry
-
-    operating_types = {
+    cash_types = {Account.AccountType.CASH, Account.AccountType.BANK}
+    current_asset_types = {
         Account.AccountType.ACCOUNTS_RECEIVABLE,
         Account.AccountType.INVENTORY,
         Account.AccountType.PREPAID_EXPENSE,
+    }
+    current_liability_types = {
         Account.AccountType.ACCOUNTS_PAYABLE,
         Account.AccountType.VAT_PAYABLE,
         Account.AccountType.PAYE_PAYABLE,
         Account.AccountType.WITHHOLDING_TAX_PAYABLE,
-        Account.AccountType.SALES_REVENUE,
-        Account.AccountType.SERVICE_REVENUE,
-        Account.AccountType.OTHER_INCOME,
-        Account.AccountType.COST_OF_SALES,
-        Account.AccountType.SALARIES,
-        Account.AccountType.RENT,
-        Account.AccountType.UTILITIES,
-        Account.AccountType.TRANSPORT,
-        Account.AccountType.OFFICE_SUPPLIES,
-        Account.AccountType.BANK_CHARGES,
-        Account.AccountType.DEPRECIATION_EXPENSE,
-        Account.AccountType.REPAIRS,
-        Account.AccountType.TAX_EXPENSE,
-        Account.AccountType.OTHER_EXPENSE,
     }
     investing_types = {
         Account.AccountType.FIXED_ASSET,
@@ -296,14 +346,81 @@ def cash_flow_statement(*, start_date, end_date):
         Account.AccountType.RETAINED_EARNINGS,
         Account.AccountType.DRAWINGS,
     }
-    cash_types = {Account.AccountType.CASH, Account.AccountType.BANK}
+
+    opening_date = start_date - timedelta(days=1)
+    opening_balances = _account_balances_by_type(as_of=opening_date)
+    closing_balances = _account_balances_by_type(as_of=end_date)
+    period_totals = _totals(start_date=start_date, end_date=end_date)
+
+    # Depreciation is the standard non-cash add-back. Other non-cash items
+    # can be marked explicitly on their journal lines.
+    depreciation_ids = Account.objects.filter(
+        account_type=Account.AccountType.DEPRECIATION_EXPENSE
+    ).values_list("id", flat=True)
+    depreciation = sum(
+        (
+            period_totals.get(account_id, (Decimal("0"), Decimal("0")))[0]
+            - period_totals.get(account_id, (Decimal("0"), Decimal("0")))[1]
+            for account_id in depreciation_ids
+        ),
+        Decimal("0"),
+    )
+    explicit_non_cash = JournalLine.objects.filter(
+        entry__status__in=COUNTED,
+        entry__entry_date__gte=start_date,
+        entry__entry_date__lte=end_date,
+        cash_flow_category=JournalLine.CashFlowCategory.NON_CASH_ADJUSTMENT,
+    ).exclude(account__account_type=Account.AccountType.DEPRECIATION_EXPENSE)
+    other_non_cash = sum(
+        (
+            line.base_debit_amount - line.base_credit_amount
+            for line in explicit_non_cash
+        ),
+        Decimal("0"),
+    )
+    non_cash_total = depreciation + other_non_cash
+
+    working_capital_rows = []
+    working_capital_adjustment = Decimal("0")
+    for account_type in sorted(current_asset_types | current_liability_types):
+        opening = opening_balances.get(account_type, Decimal("0"))
+        closing = closing_balances.get(account_type, Decimal("0"))
+        movement = closing - opening
+        adjustment = -movement if account_type in current_asset_types else movement
+        working_capital_adjustment += adjustment
+        if movement:
+            working_capital_rows.append({
+                "account_type": account_type,
+                "opening_balance": _money(opening),
+                "closing_balance": _money(closing),
+                "movement": _money(movement),
+                "cash_flow_adjustment": _money(adjustment),
+            })
+
+    net_profit = income_statement(
+        start_date=start_date, end_date=end_date
+    )["net_profit"]
+    operating_total = net_profit + non_cash_total + working_capital_adjustment
+    operating = {
+        "net_profit": _money(net_profit),
+        "non_cash_adjustments": {
+            "total": _money(non_cash_total),
+            "depreciation": _money(depreciation),
+            "other": _money(other_non_cash),
+        },
+        "working_capital_changes": working_capital_rows,
+        "working_capital_adjustment": _money(working_capital_adjustment),
+        "total": _money(operating_total),
+    }
+
+    # Investing/financing movements are classified at counterpart-line level.
+    # This supports a single journal containing several different purposes.
+    from .models import JournalEntry
     categories = {
-        "operating": defaultdict(Decimal),
         "investing": defaultdict(Decimal),
         "financing": defaultdict(Decimal),
         "unclassified": defaultdict(Decimal),
     }
-
     entries = JournalEntry.objects.filter(
         status__in=COUNTED,
         entry_date__gte=start_date,
@@ -312,8 +429,11 @@ def cash_flow_statement(*, start_date, end_date):
     for entry in entries:
         lines = list(entry.lines.all())
         cash_delta = sum(
-            (line.base_debit_amount - line.base_credit_amount)
-            for line in lines if line.account.account_type in cash_types
+            (
+                line.base_debit_amount - line.base_credit_amount
+                for line in lines if line.account.account_type in cash_types
+            ),
+            Decimal("0"),
         )
         if not cash_delta:
             continue
@@ -321,32 +441,81 @@ def cash_flow_statement(*, start_date, end_date):
             line for line in lines if line.account.account_type not in cash_types
         ]
         total_weight = sum(
-            (line.base_debit_amount + line.base_credit_amount)
-            for line in counterpart_lines
+            (
+                line.base_debit_amount + line.base_credit_amount
+                for line in counterpart_lines
+            ),
+            Decimal("0"),
         )
         if not counterpart_lines or not total_weight:
             categories["unclassified"]["Unclassified cash movement"] += cash_delta
             continue
+
         allocated = Decimal("0")
         for index, line in enumerate(counterpart_lines):
             weight = line.base_debit_amount + line.base_credit_amount
             amount = (
-                cash_delta - allocated if index == len(counterpart_lines) - 1
+                cash_delta - allocated
+                if index == len(counterpart_lines) - 1
                 else cash_delta * weight / total_weight
             )
             allocated += amount
-            account_type = line.account.account_type
-            if account_type in operating_types:
-                group = "operating"
-            elif account_type in investing_types:
+
+            explicit = line.cash_flow_category
+            if explicit == JournalLine.CashFlowCategory.INVESTING:
                 group = "investing"
-            elif account_type in financing_types:
+            elif explicit == JournalLine.CashFlowCategory.FINANCING:
                 group = "financing"
+            elif explicit in (
+                JournalLine.CashFlowCategory.OPERATING,
+                JournalLine.CashFlowCategory.NON_CASH_ADJUSTMENT,
+            ):
+                # Operating activities are already represented by the indirect
+                # calculation above; non-cash adjustments do not create cash.
+                continue
+            elif line.account.account_type in investing_types:
+                group = "investing"
+            elif line.account.account_type in financing_types:
+                group = "financing"
+            elif line.account.account_type in {
+                Account.AccountType.ACCOUNTS_RECEIVABLE,
+                Account.AccountType.INVENTORY,
+                Account.AccountType.PREPAID_EXPENSE,
+                Account.AccountType.ACCOUNTS_PAYABLE,
+                Account.AccountType.VAT_PAYABLE,
+                Account.AccountType.PAYE_PAYABLE,
+                Account.AccountType.WITHHOLDING_TAX_PAYABLE,
+                Account.AccountType.SALES_REVENUE,
+                Account.AccountType.SERVICE_REVENUE,
+                Account.AccountType.OTHER_INCOME,
+                Account.AccountType.COST_OF_SALES,
+                Account.AccountType.SALARIES,
+                Account.AccountType.RENT,
+                Account.AccountType.UTILITIES,
+                Account.AccountType.TRANSPORT,
+                Account.AccountType.OFFICE_SUPPLIES,
+                Account.AccountType.BANK_CHARGES,
+                Account.AccountType.DEPRECIATION_EXPENSE,
+                Account.AccountType.REPAIRS,
+                Account.AccountType.TAX_EXPENSE,
+                Account.AccountType.OTHER_EXPENSE,
+            }:
+                continue
             else:
                 group = "unclassified"
             categories[group][line.account.name] += amount
 
-    opening_totals = _totals(end_date=start_date - timedelta(days=1))
+    def category_payload(rows):
+        total = sum(rows.values(), Decimal("0"))
+        return {
+            "total": _money(total),
+            "accounts": [
+                {"name": name, "net_cash_flow": _money(amount)}
+                for name, amount in sorted(rows.items()) if amount
+            ],
+        }
+
+    opening_totals = _totals(end_date=opening_date)
     closing_totals = _totals(end_date=end_date)
     cash_accounts = Account.objects.filter(account_type__in=cash_types)
     opening_cash = closing_cash = Decimal("0")
@@ -360,34 +529,63 @@ def cash_flow_statement(*, start_date, end_date):
         opening_cash += opening_debit - opening_credit
         closing_cash += closing_debit - closing_credit
 
-    result = {}
-    for group, rows in categories.items():
-        total = sum(rows.values(), Decimal("0"))
-        result[group] = {
-            "total": _money(total),
-            "accounts": [
-                {"name": name, "net_cash_flow": _money(amount)}
-                for name, amount in sorted(rows.items()) if amount
-            ],
-        }
-    classified_total = sum(
-        (sum(rows.values(), Decimal("0")) for rows in categories.values()),
-        Decimal("0"),
-    )
+    investing = category_payload(categories["investing"])
+    financing = category_payload(categories["financing"])
+    unclassified = category_payload(categories["unclassified"])
     net_change = closing_cash - opening_cash
+    classified_total = (
+        operating_total
+        + categories["investing"].copy().popitem()[1]
+        if False else
+        operating_total
+        + sum(categories["investing"].values(), Decimal("0"))
+        + sum(categories["financing"].values(), Decimal("0"))
+        + sum(categories["unclassified"].values(), Decimal("0"))
+    )
     return {
         "start_date": start_date,
         "end_date": end_date,
+        "method": "indirect",
         "opening_cash_and_bank": _money(opening_cash),
-        "operating": result["operating"],
-        "investing": result["investing"],
-        "financing": result["financing"],
-        "unclassified": result["unclassified"],
+        "operating": operating,
+        "investing": investing,
+        "financing": financing,
+        "unclassified": unclassified,
         "net_change_in_cash": _money(net_change),
         "closing_cash_and_bank": _money(closing_cash),
         "reconciliation_difference": _money(net_change - classified_total),
         "classification_note": (
-            "Cash flows are classified from journal counterpart account types. "
-            "Review unclassified items; transfers between cash/bank accounts net to zero."
+            "Operating cash flow uses the indirect method. Mark journal lines "
+            "as investing or financing when account type alone is ambiguous. "
+            "Unclassified cash movements remain separate; transfers between "
+            "cash/bank accounts net to zero."
         ),
+    }
+
+
+def comparative_cash_flow_statement(
+    *, start_date, end_date, compare_start, compare_end
+):
+    current = cash_flow_statement(start_date=start_date, end_date=end_date)
+    comparison = cash_flow_statement(
+        start_date=compare_start, end_date=compare_end
+    )
+    metrics = (
+        "opening_cash_and_bank", "net_change_in_cash",
+        "closing_cash_and_bank",
+    )
+    current_values = {
+        key: current[key] for key in metrics
+    }
+    comparison_values = {
+        key: comparison[key] for key in metrics
+    }
+    variance, variance_percent = _variance(
+        current_values, comparison_values, metrics
+    )
+    return {
+        "current": current,
+        "comparison": comparison,
+        "variance": variance,
+        "variance_percent": variance_percent,
     }
