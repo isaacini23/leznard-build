@@ -370,6 +370,9 @@ class Tenancy(TenantModel):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     end_reason = models.CharField(max_length=300, blank=True)
     notes = models.TextField(blank=True)
+    renewed_from = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="renewal"
+    )
 
     class Meta:
         verbose_name_plural = "tenancies"
@@ -387,6 +390,10 @@ class Tenancy(TenantModel):
 
     def clean(self):
         super().clean()
+        if self.rent_amount is not None and not self.rent_amount.is_finite():
+            raise ValidationError({"rent_amount": "Enter a finite amount."})
+        if self.deposit_amount is not None and not self.deposit_amount.is_finite():
+            raise ValidationError({"deposit_amount": "Enter a finite amount."})
         if self.rent_amount is not None and self.rent_amount < 0:
             raise ValidationError({"rent_amount": "Rent cannot be negative."})
         if self.deposit_amount is not None and self.deposit_amount < 0:
