@@ -390,10 +390,6 @@ class Tenancy(TenantModel):
 
     def clean(self):
         super().clean()
-        if self.rent_amount is not None and not self.rent_amount.is_finite():
-            raise ValidationError({"rent_amount": "Enter a finite amount."})
-        if self.deposit_amount is not None and not self.deposit_amount.is_finite():
-            raise ValidationError({"deposit_amount": "Enter a finite amount."})
         if self.rent_amount is not None and self.rent_amount < 0:
             raise ValidationError({"rent_amount": "Rent cannot be negative."})
         if self.deposit_amount is not None and self.deposit_amount < 0:
@@ -600,3 +596,45 @@ class MaintenanceRequest(TenantModel):
             self.organization_id = get_current_org_id()
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class DepositTransaction(TenantModel):
+    """Money held for a tenant as a security deposit: received, deducted (kept for damages or
+    arrears) or refunded. Each movement is posted to the ledger and never edited or deleted."""
+
+    class Kind(models.TextChoices):
+        RECEIVED = "received", "Received"
+        DEDUCTION = "deduction", "Deducted"
+        REFUND = "refund", "Refunded"
+
+    tenancy = models.ForeignKey(Tenancy, on_delete=models.PROTECT, related_name="deposit_transactions")
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    transaction_date = models.DateField()
+    account = models.ForeignKey(
+        "accounting.Account", on_delete=models.PROTECT, related_name="+",
+        help_text="Bank or cash account for receipts and refunds; income account for deductions.",
+    )
+    reason = models.CharField(max_length=300, blank=True)
+    journal_entry = models.OneToOneField(
+        "accounting.JournalEntry", on_delete=models.PROTECT, related_name="deposit_transaction"
+    )
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["transaction_date", "created_at"]
+        constraints = [
+            models.CheckConstraint(condition=Q(amount__gt=0), name="deposit_amount_positive"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            raise ValidationError("Deposit movements cannot be changed.")
+        if self.organization_id is None:
+            self.organization_id = get_current_org_id()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Deposit movements cannot be deleted.")
