@@ -371,7 +371,8 @@ def cash_flow_statement(*, start_date, end_date):
             ],
         }
     classified_total = sum(
-        (result[group]["total"] for group in result), Decimal("0")
+        (sum(rows.values(), Decimal("0")) for rows in categories.values()),
+        Decimal("0"),
     )
     net_change = closing_cash - opening_cash
     return {
