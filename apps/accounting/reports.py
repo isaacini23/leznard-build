@@ -392,6 +392,27 @@ def cash_flow_statement(*, start_date, end_date):
     )
     non_cash_total = depreciation + other_non_cash
 
+    explicit_reclassifications = JournalLine.objects.filter(
+        entry__status__in=COUNTED,
+        entry__entry_date__gte=start_date,
+        entry__entry_date__lte=end_date,
+        entry__is_year_end_closing=False,
+        cash_flow_category__in=(
+            JournalLine.CashFlowCategory.INVESTING,
+            JournalLine.CashFlowCategory.FINANCING,
+        ),
+    )
+    explicit_wc_reclass = defaultdict(Decimal)
+    explicit_pl_reclass = Decimal("0")
+    for line in explicit_reclassifications.select_related("account"):
+        signed_cash_effect = line.base_credit_amount - line.base_debit_amount
+        if line.account.account_type in current_asset_types | current_liability_types:
+            explicit_wc_reclass[line.account.account_type] += signed_cash_effect
+        if line.account.category in (Account.Category.INCOME, Account.Category.EXPENSE):
+            # This gain, loss, income or expense is included in net profit;
+            # remove it from operating cash flow when classified as investing/financing.
+            explicit_pl_reclass -= signed_cash_effect
+
     working_capital_rows = []
     working_capital_adjustment = Decimal("0")
     for account_type in sorted(current_asset_types | current_liability_types):
@@ -399,6 +420,7 @@ def cash_flow_statement(*, start_date, end_date):
         closing = closing_balances.get(account_type, Decimal("0"))
         movement = closing - opening
         adjustment = -movement if account_type in current_asset_types else movement
+        adjustment -= explicit_wc_reclass.get(account_type, Decimal("0"))
         working_capital_adjustment += adjustment
         if movement:
             working_capital_rows.append({
@@ -412,8 +434,12 @@ def cash_flow_statement(*, start_date, end_date):
     net_profit = income_statement(
         start_date=start_date, end_date=end_date
     )["net_profit"]
-    operating_total = net_profit + non_cash_total + working_capital_adjustment
+    operating_total = (
+        net_profit + explicit_pl_reclass + non_cash_total + working_capital_adjustment
+    )
     operating_adjustments = defaultdict(Decimal)
+    if explicit_pl_reclass:
+        operating_adjustments["Investing/financing gains and losses reclassified"] += explicit_pl_reclass
     operating_account_types = current_asset_types | current_liability_types
     known_profit_loss_types = {
         Account.AccountType.SALES_REVENUE,
@@ -456,8 +482,10 @@ def cash_flow_statement(*, start_date, end_date):
             ),
             Decimal("0"),
         )
-        if not cash_delta:
-            continue
+        # Do not skip a compound journal merely because its gross cash inflows
+        # and outflows net to zero. Its investing/financing counterpart lines
+        # still need to be shown individually. Pure cash-to-cash transfers have
+        # no counterpart lines and naturally produce no external cash flow.
         counterpart_lines = [
             line for line in lines if line.account.account_type not in cash_types
         ]
