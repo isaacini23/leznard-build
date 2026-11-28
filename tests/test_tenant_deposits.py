@@ -17,11 +17,17 @@ def deposit(client, org, tid):
     return call(client, "get", f"/api/v1/tenancies/{tid}/deposit/", org).json()
 
 
+def bank_account_id(client, org):
+    accounts = call(client, "get", "/api/v1/accounts/", org).json()
+    return next(account["id"] for account in accounts if account["code"] == "1010")
+
+
 def test_deposit_lifecycle_posts_to_ledger():
     c, org = register()
     t = make(c, org)
     tid = t["id"]
-    assert call(c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org, {"amount": "200000", "date": "2027-01-31"}).status_code == 201
+    account_id = bank_account_id(c, org)
+    assert call(c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org, {"amount": "200000", "date": "2027-01-31", "account": account_id}).status_code == 201
     d = deposit(c, org, tid)
     assert d["received"] == "200000.00" and d["held"] == "200000.00"
     # cannot refund or deduct while the tenancy is still running
@@ -32,7 +38,7 @@ def test_deposit_lifecycle_posts_to_ledger():
     assert call(c, "post", f"/api/v1/tenancies/{tid}/deposit/deduct/", org, {"amount": "30000"}).status_code == 400  # needs a reason
     ok = call(c, "post", f"/api/v1/tenancies/{tid}/deposit/deduct/", org, {"amount": "30000", "reason": "Broken window"})
     assert ok.status_code == 201, ok.content
-    refund = call(c, "post", f"/api/v1/tenancies/{tid}/deposit/refund/", org, {"date": "2027-07-05"})
+    refund = call(c, "post", f"/api/v1/tenancies/{tid}/deposit/refund/", org, {"date": "2027-07-05", "account": account_id})
     assert refund.status_code == 201, refund.content
     d = refund.json()
     assert d["deducted"] == "30000.00" and d["refunded"] == "170000.00" and d["held"] == "0.00"
@@ -47,7 +53,8 @@ def test_deposit_lifecycle_posts_to_ledger():
 def test_deposit_follows_a_renewal_and_permissions():
     c, org = register()
     t = make(c, org)
-    call(c, "post", f"/api/v1/tenancies/{t['id']}/deposit/receive/", org, {"amount": "200000", "date": "2027-01-31"})
+    account_id = bank_account_id(c, org)
+    call(c, "post", f"/api/v1/tenancies/{t['id']}/deposit/receive/", org, {"amount": "200000", "date": "2027-01-31", "account": account_id})
     sched = call(c, "get", f"/api/v1/tenancies/{t['id']}/rent-schedule/", org).json()
     call(c, "post", f"/api/v1/rent-schedules/{sched['id']}/generate/", org, {})
     new = call(c, "post", f"/api/v1/tenancies/{t['id']}/renew/", org, {"start_date": "2027-02-28"}).json()
@@ -58,3 +65,29 @@ def test_deposit_follows_a_renewal_and_permissions():
     other, other_org = register("second@example.com", "Other Co")
     assert call(other, "get", f"/api/v1/tenancies/{new['id']}/deposit/", other_org).status_code == 404
     assert call(c, "post", f"/api/v1/tenancies/{new['id']}/deposit/receive/", org, {"amount": "-5"}).status_code == 400
+
+def test_deposit_requires_explicit_account_and_rejects_rounded_zero_or_overpayment():
+    c, org = register()
+    t = make(c, org)
+    tid = t["id"]
+    account_id = bank_account_id(c, org)
+
+    missing_account = call(
+        c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org,
+        {"amount": "200000"},
+    )
+    assert missing_account.status_code == 400
+    assert deposit(c, org, tid)["received"] == "0.00"
+
+    sub_kobo = call(
+        c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org,
+        {"amount": "0.001", "account": account_id},
+    )
+    assert sub_kobo.status_code == 400
+
+    overpayment = call(
+        c, "post", f"/api/v1/tenancies/{tid}/deposit/receive/", org,
+        {"amount": "200001", "account": account_id},
+    )
+    assert overpayment.status_code == 400
+    assert deposit(c, org, tid)["received"] == "0.00"
