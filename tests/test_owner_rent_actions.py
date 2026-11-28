@@ -3,6 +3,14 @@ import pytest
 from tests.test_properties import call, register, staff_client
 from tests.test_rent_management import active_tenancy, configure_schedule
 
+
+def bank_account_id(org):
+    from apps.accounting.models import Account
+    from apps.core.tenancy import organization_context
+
+    with organization_context(org):
+        return str(Account.objects.get(account_type=Account.AccountType.BANK).pk)
+
 pytestmark = pytest.mark.django_db
 
 
@@ -33,28 +41,39 @@ def test_post_endpoint_and_double_post_refused():
     assert call(c, "post", f"/api/v1/rent-charges/{charge['id']}/post/", org).status_code == 400
 
 
+def test_pay_requires_an_explicit_bank_or_cash_account():
+    c, org = register()
+    charge, _ = generated_charge(c, org)
+    url = f"/api/v1/rent-charges/{charge['id']}/pay/"
+    missing = call(c, "post", url, org, {})
+    assert missing.status_code == 400
+    assert call(c, "get", f"/api/v1/tenancies/{charge['tenancy']}/rent-charges/", org).json()[0]["invoice_status"] == "draft"
+
+
 def test_pay_posts_invoice_and_receipt_and_defaults_to_full_amount():
     c, org = register()
     charge, tenancy = generated_charge(c, org)  # still a draft invoice
-    paid = call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {})
+    account = bank_account_id(org)
+    paid = call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"account": account})
     assert paid.status_code == 200, paid.content
     body = paid.json()
     assert body["status"] == "paid" and body["amount_due"] == "0.0000" and body["invoice_status"] == "posted"
-    assert call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {}).status_code == 400
+    assert call(c, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"account": account}).status_code == 400
 
 
 def test_part_payments_accumulate_and_overpaying_is_refused():
     c, org = register()
     charge, tenancy = generated_charge(c, org, post=True)
     url = f"/api/v1/rent-charges/{charge['id']}/pay/"
-    first = call(c, "post", url, org, {"amount": "50000", "payment_date": "2027-02-02", "method": "cash"})
+    account = bank_account_id(org)
+    first = call(c, "post", url, org, {"account": account, "amount": "50000", "payment_date": "2027-02-02", "method": "cash"})
     assert first.status_code == 200, first.content
     assert first.json()["status"] == "partially_paid" and first.json()["amount_due"] == "70000.0000"
-    assert call(c, "post", url, org, {"amount": "80000"}).status_code == 400
-    assert call(c, "post", url, org, {"amount": "0"}).status_code == 400
-    assert call(c, "post", url, org, {"amount": "abc"}).status_code == 400
-    assert call(c, "post", url, org, {"payment_date": "nope"}).status_code == 400
-    done = call(c, "post", url, org, {"amount": "70000"})
+    assert call(c, "post", url, org, {"account": account, "amount": "80000"}).status_code == 400
+    assert call(c, "post", url, org, {"account": account, "amount": "0"}).status_code == 400
+    assert call(c, "post", url, org, {"account": account, "amount": "abc"}).status_code == 400
+    assert call(c, "post", url, org, {"account": account, "payment_date": "nope"}).status_code == 400
+    done = call(c, "post", url, org, {"account": account, "amount": "70000"})
     assert done.json()["status"] == "paid"
     assert charges(c, org, tenancy)[0]["amount_paid"] == "120000.0000"
 
@@ -66,6 +85,6 @@ def test_permissions_and_company_isolation():
     assert call(auditor, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {}).status_code == 403
     assert call(auditor, "post", f"/api/v1/rent-charges/{charge['id']}/post/", org).status_code == 403
     officer = staff_client(org, "Property officer", "po@example.com")
-    assert call(officer, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"amount": "1000"}).status_code == 200
+    assert call(officer, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", org, {"account": bank_account_id(org), "amount": "1000"}).status_code == 200
     other, other_org = register("second@example.com", "Other Co")
     assert call(other, "post", f"/api/v1/rent-charges/{charge['id']}/pay/", other_org, {}).status_code == 404
