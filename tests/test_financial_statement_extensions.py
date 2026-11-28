@@ -289,7 +289,7 @@ def test_reversal_of_year_end_closing_restores_unclosed_profit(org):
         {"account": "4100", "debit": "500.00"},
         {"account": "6100", "credit": "100.00"},
         {"account": "3100", "credit": "400.00"},
-    ], is_year_end_closing=True)
+    ], is_year_end_closing=True, closing_period_end=date(2025, 12, 31))
     from apps.accounting.services import reverse_journal_entry
     reversal = reverse_journal_entry(closing, entry_date=date(2026, 1, 3))
     assert reversal.is_year_end_closing is True
@@ -324,3 +324,32 @@ def test_comparative_cash_flow_endpoint_is_available():
     )
     assert response.status_code == 200
     assert response.json()["current"]["method"] == "indirect"
+
+
+
+def test_cash_transfers_between_bank_and_cash_are_not_external_flows(org):
+    book(org, date(2026, 3, 18), "1010", "1000", "200.00")
+    with organization_context(org.id):
+        report = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
+        )
+    assert report["net_change_in_cash"] == Decimal("1000.00")
+    assert report["unclassified"]["total"] == Decimal("0.00")
+    assert report["reconciliation_difference"] == Decimal("0.00")
+
+
+def test_reversal_after_report_period_does_not_rewrite_historical_cash_flow(org):
+    from apps.accounting.services import reverse_journal_entry
+
+    original = book(org, date(2026, 3, 30), "1010", "4100", "100.00")
+    reverse_journal_entry(original, entry_date=date(2026, 4, 2))
+    with organization_context(org.id):
+        march = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31)
+        )
+        april = cash_flow_statement(
+            start_date=date(2026, 1, 1), end_date=date(2026, 4, 30)
+        )
+    assert march["net_change_in_cash"] == Decimal("1100.00")
+    assert april["net_change_in_cash"] == Decimal("1000.00")
+    assert april["reconciliation_difference"] == Decimal("0.00")
